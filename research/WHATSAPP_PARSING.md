@@ -1,6 +1,7 @@
 # Pesquisa: Parsing de Exportação WhatsApp
 
 > **Objetivo:** Documentar todos os formatos de exportação do WhatsApp para criar um parser robusto
+> **Plataforma alvo:** Desktop (Node.js fs) — v1.0 Electron
 
 ---
 
@@ -15,6 +16,13 @@
 1. Abrir conversa → Nome do contato → Exportar conversa
 2. Escolher "Sem mídia" ou "Anexar mídia"
 3. Compartilhar arquivo .txt (ou .zip com mídia)
+
+### Importação no Recall.ai (Desktop)
+O arquivo exportado pode ser importado de duas formas:
+1. **Drag & drop** — arrastar o .txt ou .zip para a janela do app
+2. **Diálogo nativo** — clicar em "Importar" e selecionar o arquivo
+
+A leitura é feita via `Node.js fs` com acesso direto ao filesystem, sem limitações de sandbox.
 
 ---
 
@@ -205,6 +213,10 @@ Linha 3
 ## 6. Algoritmo de Parsing Proposto
 
 ```typescript
+import { readFileSync } from 'node:fs';
+import { createReadStream } from 'node:fs';
+import { createInterface } from 'node:readline';
+
 interface ParseResult {
   messages: ParsedMessage[];
   format: DetectedFormat;
@@ -221,21 +233,27 @@ interface DetectedFormat {
   hasBrackets: boolean;
 }
 
-async function parseWhatsAppExport(content: string): Promise<ParseResult> {
-  const lines = content.split('\n');
-  const format = detectFormat(lines.slice(0, 20));  // Detecta com primeiras linhas
+// Leitura eficiente com streaming (Node.js fs)
+async function parseWhatsAppExport(filePath: string): Promise<ParseResult> {
+  const format = await detectFormatFromFile(filePath);
   const pattern = getPatternForFormat(format);
 
   const messages: ParsedMessage[] = [];
   let currentMessage: Partial<ParsedMessage> | null = null;
   const errors: ParseError[] = [];
+  let lineNumber = 0;
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+  // Streaming line-by-line para arquivos grandes (100k+ linhas)
+  const rl = createInterface({
+    input: createReadStream(filePath, { encoding: 'utf-8' }),
+    crlfDelay: Infinity,
+  });
+
+  for await (const line of rl) {
+    lineNumber++;
     const match = pattern.exec(line);
 
     if (match) {
-      // Nova mensagem
       if (currentMessage) {
         messages.push(finalizeMessage(currentMessage));
       }
@@ -244,18 +262,15 @@ async function parseWhatsAppExport(content: string): Promise<ParseResult> {
         sender: match[3].trim(),
         content: match[4],
         type: detectType(match[4]),
-        lineNumber: i + 1,
+        lineNumber,
       };
     } else if (currentMessage && line.trim()) {
-      // Continuação da mensagem anterior
       currentMessage.content += '\n' + line;
     } else if (line.trim() && !currentMessage) {
-      // Linha órfã - erro de parsing
-      errors.push({ line: i + 1, content: line, reason: 'orphan_line' });
+      errors.push({ line: lineNumber, content: line, reason: 'orphan_line' });
     }
   }
 
-  // Última mensagem
   if (currentMessage) {
     messages.push(finalizeMessage(currentMessage));
   }
@@ -265,7 +280,7 @@ async function parseWhatsAppExport(content: string): Promise<ParseResult> {
     format,
     errors,
     stats: {
-      totalLines: lines.length,
+      totalLines: lineNumber,
       totalMessages: messages.length,
       errorCount: errors.length,
       participants: [...new Set(messages.map(m => m.sender))],
@@ -273,24 +288,66 @@ async function parseWhatsAppExport(content: string): Promise<ParseResult> {
   };
 }
 
+// Detecta formato lendo apenas as 20 primeiras linhas
+async function detectFormatFromFile(filePath: string): Promise<DetectedFormat> {
+  const rl = createInterface({
+    input: createReadStream(filePath, { encoding: 'utf-8' }),
+    crlfDelay: Infinity,
+  });
+
+  const sampleLines: string[] = [];
+  for await (const line of rl) {
+    sampleLines.push(line);
+    if (sampleLines.length >= 20) break;
+  }
+  rl.close();
+
+  return detectFormat(sampleLines);
+}
+
 function detectFormat(sampleLines: string[]): DetectedFormat {
-  // Tenta cada padrão conhecido
   const patterns = [
-    { regex: ANDROID_BR, platform: 'android', locale: 'pt-BR', ... },
-    { regex: IOS_EN, platform: 'ios', locale: 'en-US', ... },
-    { regex: ANDROID_EN, platform: 'android', locale: 'en-US', ... },
+    { regex: ANDROID_BR, platform: 'android', locale: 'pt-BR' },
+    { regex: IOS_EN, platform: 'ios', locale: 'en-US' },
+    { regex: ANDROID_EN, platform: 'android', locale: 'en-US' },
     // ... outros
   ];
 
   for (const line of sampleLines) {
     for (const p of patterns) {
       if (p.regex.test(line)) {
-        return p;
+        return p as DetectedFormat;
       }
     }
   }
 
   throw new Error('Formato não reconhecido');
+}
+```
+
+### 6.1 Suporte a .zip (WhatsApp com mídia)
+
+```typescript
+import { createReadStream } from 'node:fs';
+import { Parse as ZipParse } from 'unzipper';
+
+async function parseFromZip(zipPath: string): Promise<ParseResult> {
+  const zip = createReadStream(zipPath).pipe(ZipParse());
+
+  for await (const entry of zip) {
+    if (entry.path.endsWith('.txt') && !entry.path.startsWith('__MACOSX')) {
+      const content = await entry.buffer();
+      // Salva o .txt temporariamente e parsea
+      const txtPath = path.join(app.getPath('temp'), `recall-import-${Date.now()}.txt`);
+      await fs.writeFile(txtPath, content);
+      const result = await parseWhatsAppExport(txtPath);
+      await fs.unlink(txtPath);
+      return result;
+    }
+    entry.autodrain();
+  }
+
+  throw new Error('Nenhum arquivo .txt encontrado no .zip');
 }
 ```
 
@@ -308,6 +365,7 @@ function detectFormat(sampleLines: string[]): DetectedFormat {
 | Edge cases (emoji, etc) | `edge_cases.txt` |
 | Chat grande (100k+ msgs) | `large_chat.txt` |
 | Caracteres especiais | `special_chars.txt` |
+| Importação via .zip | `chat_with_media.zip` |
 
 ---
 
@@ -318,6 +376,7 @@ function detectFormat(sampleLines: string[]): DetectedFormat {
 3. **WhatsApp Business:** Pode ter campos extras
 4. **Edições:** Mensagens editadas aparecem com "(editada)" no final
 5. **Respostas:** Citações não são identificadas como tal
+6. **Encoding:** Maioria dos exports usa UTF-8, mas alguns dispositivos antigos podem usar encodings diferentes
 
 ---
 
@@ -328,3 +387,18 @@ Se parsing falhar:
 2. Se nenhum funcionar, solicitar ao usuário que identifique o formato
 3. Logar formato desconhecido para análise futura
 4. Permitir parsing "best effort" ignorando linhas problemáticas
+
+---
+
+## 10. Portabilidade para Mobile (v2.0)
+
+O core do parser é puro TypeScript e independe de plataforma. Para o port mobile:
+
+| Componente | Desktop (v1.0) | Mobile (v2.0) |
+|-----------|---------------|---------------|
+| **Leitura de arquivo** | `fs.createReadStream` | `expo-file-system` |
+| **Seleção de arquivo** | Drag & drop / `dialog.showOpenDialog` | `expo-document-picker` |
+| **Suporte .zip** | `unzipper` (npm) | `expo-file-system` (unzip) |
+| **Parser core** | ✅ Reutilizado 100% | ✅ Reutilizado 100% |
+| **Regex patterns** | ✅ Reutilizado 100% | ✅ Reutilizado 100% |
+| **Tipos TypeScript** | ✅ Reutilizado 100% | ✅ Reutilizado 100% |

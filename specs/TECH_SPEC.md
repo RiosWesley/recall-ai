@@ -1,7 +1,7 @@
 # Recall.ai — Especificações Técnicas
 
-> **Versão:** 1.0
-> **Última Atualização:** Janeiro 2026
+> **Versão:** 2.0 (Desktop-First)
+> **Última Atualização:** Março 2026
 
 ---
 
@@ -11,23 +11,45 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        STACK RECALL.AI                          │
-├─────────────────────────────────────────────────────────────────┤
+│                    STACK RECALL.AI v1.0 (DESKTOP)                │
+├───────────────────┬──────────────────────────┬──────────────────┤
 │  CAMADA           │  TECNOLOGIA              │  VERSÃO          │
 ├───────────────────┼──────────────────────────┼──────────────────┤
-│  Framework        │  React Native (Expo)     │  SDK 52+         │
+│  Shell            │  Electron                │  33+             │
 │  Linguagem        │  TypeScript              │  5.x             │
-│  Runtime          │  Hermes                  │  Latest          │
-│  Estado Global    │  Zustand                 │  4.x             │
+│  Build Tool       │  electron-vite           │  Latest          │
+│  Frontend         │  React                   │  19.x            │
+│  UI Components    │  Shadcn UI (Radix)       │  Latest          │
+│  Styling          │  Tailwind CSS            │  4.x             │
+│  Estado Global    │  Zustand                 │  5.x             │
 │  Async State      │  TanStack Query          │  5.x             │
-│  Database         │  op-sqlite               │  Latest          │
-│  ML Runtime       │  Google LiteRT           │  Latest          │
-│  ML Bridge        │  react-native-fast-tflite│  Latest          │
-│  Navegação        │  Expo Router             │  3.x             │
-│  UI Components    │  Tamagui ou NativeWind   │  Latest          │
-│  Animações        │  Reanimated              │  3.x             │
-│  File System      │  expo-file-system        │  Latest          │
-│  Document Picker  │  expo-document-picker    │  Latest          │
+│  Database         │  better-sqlite3          │  Latest          │
+│  Vector Search    │  sqlite-vec              │  Latest          │
+│  Full-Text Search │  SQLite FTS5             │  Built-in        │
+│  ML Runtime       │  node-llama-cpp          │  Latest          │
+│  Animações        │  Framer Motion           │  Latest          │
+│  Routing          │  React Router            │  7.x             │
+│  Auto-Update      │  electron-updater        │  Latest          │
+│  Packaging        │  electron-builder        │  Latest          │
+└───────────────────┴──────────────────────────┴──────────────────┘
+```
+
+### 1.2 Comparação Desktop vs Mobile (v2.0)
+
+```
+┌───────────────────┬──────────────────────────┬──────────────────┐
+│  CAMADA           │  DESKTOP (v1.0)          │  MOBILE (v2.0)   │
+├───────────────────┼──────────────────────────┼──────────────────┤
+│  Shell            │  Electron                │  React Native    │
+│  Build            │  electron-vite           │  Expo SDK 52+    │
+│  Database         │  better-sqlite3          │  op-sqlite (JSI) │
+│  Vector Search    │  sqlite-vec              │  Cosine manual   │
+│  ML Runtime       │  node-llama-cpp          │  LiteRT / TFLite │
+│  File System      │  Node.js fs (direto)     │  expo-file-system│
+│  Navegação        │  React Router            │  Expo Router     │
+│  UI Components    │  Shadcn UI               │  Tamagui/NativeW │
+│  Animações        │  Framer Motion           │  Reanimated      │
+│  Distribuição     │  electron-builder        │  App/Play Store  │
 └───────────────────┴──────────────────────────┴──────────────────┘
 ```
 
@@ -41,18 +63,18 @@
 |-------------|-------|
 | **Nome** | all-MiniLM-L6-v2 |
 | **Origem** | Sentence Transformers (HuggingFace) |
-| **Formato** | TFLite (quantizado) |
+| **Formato** | GGUF (via node-llama-cpp) |
 | **Tamanho** | ~25MB |
 | **Dimensão Output** | 384 |
 | **Max Sequence** | 256 tokens |
-| **Quantização** | INT8 ou Float16 |
+| **Download** | Automático no first-run |
 
 **Alternativas consideradas:**
 - `paraphrase-MiniLM-L3-v2` (~17MB, menor qualidade)
-- `all-mpnet-base-v2` (~90MB, melhor qualidade, muito grande)
+- `all-mpnet-base-v2` (~90MB, melhor qualidade, viável no desktop)
 - `e5-small-v2` (~30MB, boa alternativa)
 
-**Decisão:** all-MiniLM-L6-v2 oferece o melhor trade-off tamanho/qualidade.
+**Decisão:** all-MiniLM-L6-v2 oferece o melhor trade-off tamanho/qualidade e é o mesmo modelo planejado para o mobile (v2.0), garantindo compatibilidade de embeddings.
 
 ---
 
@@ -62,31 +84,54 @@
 |-------------|-------|
 | **Nome** | Gemma 3 270M |
 | **Origem** | Google DeepMind |
-| **Lançamento** | Setembro 2025 |
+| **Formato** | GGUF (INT4 quantizado) |
 | **Parâmetros** | 270M total |
 | **Arquitetura** | 170M embedding + 100M transformer |
 | **Vocabulário** | 256,000 tokens |
 | **Contexto** | 32K tokens |
-| **Quantização** | INT4 (QAT - Quantization Aware Training) |
-| **Tamanho (INT4)** | ~150MB |
+| **Tamanho (INT4 GGUF)** | ~150MB |
+| **Runtime** | node-llama-cpp |
+| **Execução** | Electron Utility Process |
+| **Download** | Automático no first-run |
+
+**Performance Desktop (estimada):**
+
+| Hardware | Tokens/s | Primeiro Token |
+|----------|----------|----------------|
+| CPU (x86_64 AVX2) | 15-25 | 300ms-1s |
+| CPU (Apple Silicon) | 20-35 | 200ms-800ms |
+| GPU NVIDIA (CUDA) | 30-50 | 100ms-500ms |
+| GPU AMD (Vulkan) | 25-40 | 150ms-600ms |
+| GPU Intel/iGPU (Vulkan) | 20-30 | 200ms-700ms |
+| GPU Apple (Metal) | 30-50 | 100ms-500ms |
 
 **Características especiais:**
 - Projetado para fine-tuning em tarefas específicas
 - Excelente para extração de informação
 - Vocabulário grande (bom para PT-BR e gírias)
-- Baixo consumo de bateria (0.75% por 25 conversas no Pixel 9)
+- Modelo leve — roda confortavelmente até em hardware modesto
+- Mesmo modelo será usado no mobile (v2.0), garantindo paridade de comportamento
 
-**Alternativas consideradas:**
-- `Gemma 3 1B` (~600MB INT4, mais capaz, mais pesado)
-- `Phi-3.5 Mini` (~1.5GB, muito pesado)
+**Alternativas para upgrade futuro (desktop):**
+- `Gemma 3 1B` (~700MB INT4, mais capaz, settings opcionais)
+- `Phi-3.5 Mini` (~1.5GB, qualidade superior)
 - `Qwen2.5-0.5B` (~400MB, boa alternativa)
 - `SmolLM2-360M` (~200MB, alternativa leve)
+
+> **Nota:** O usuário poderá trocar de modelo nas Settings sem recompilar, graças ao formato GGUF padronizado do node-llama-cpp.
 
 ---
 
 ## 3. Banco de Dados
 
-### 3.1 Schema SQLite
+### 3.1 Tecnologia
+
+- **Engine:** better-sqlite3 (wrapper síncrono nativo para SQLite)
+- **Vector Search:** sqlite-vec (extensão KNN com aceleração SIMD)
+- **Full-Text Search:** FTS5 (built-in do SQLite)
+- **Localização:** `app.getPath('userData')/recall-ai.db`
+
+### 3.2 Schema SQLite
 
 ```sql
 -- Tabela principal de chats importados
@@ -129,13 +174,17 @@ CREATE TABLE chunks (
   created_at INTEGER DEFAULT (strftime('%s', 'now'))
 );
 
--- Tabela de vetores (embeddings)
-CREATE TABLE vectors (
-  id TEXT PRIMARY KEY,
-  chunk_id TEXT NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
-  embedding BLOB NOT NULL,  -- Float32Array serializado
-  dimension INTEGER DEFAULT 384,
-  model_version TEXT DEFAULT 'minilm-l6-v2'
+-- Tabela de vetores (embeddings via sqlite-vec)
+CREATE VIRTUAL TABLE vectors USING vec0(
+  chunk_id TEXT PRIMARY KEY,
+  embedding FLOAT[384]           -- dimensão do MiniLM-L6-v2
+);
+
+-- Full-Text Search para busca híbrida
+CREATE VIRTUAL TABLE chunks_fts USING fts5(
+  content,
+  chunk_id UNINDEXED,
+  tokenize='unicode61'
 );
 
 -- Índices para performance
@@ -144,9 +193,8 @@ CREATE INDEX idx_messages_timestamp ON messages(timestamp);
 CREATE INDEX idx_messages_sender ON messages(sender);
 CREATE INDEX idx_chunks_chat ON chunks(chat_id);
 CREATE INDEX idx_chunks_time ON chunks(start_time, end_time);
-CREATE INDEX idx_vectors_chunk ON vectors(chunk_id);
 
--- Tabela de cache de queries (opcional)
+-- Tabela de cache de queries
 CREATE TABLE query_cache (
   id TEXT PRIMARY KEY,
   query_text TEXT NOT NULL,
@@ -156,59 +204,114 @@ CREATE TABLE query_cache (
   created_at INTEGER DEFAULT (strftime('%s', 'now')),
   hit_count INTEGER DEFAULT 0
 );
+
+-- Tabela de histórico de buscas
+CREATE TABLE search_history (
+  id TEXT PRIMARY KEY,
+  query TEXT NOT NULL,
+  chat_ids TEXT,       -- JSON array (filtro usado)
+  result_count INTEGER,
+  created_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
 ```
 
-### 3.2 Serialização de Vetores
+### 3.3 Operações com sqlite-vec
 
 ```typescript
-// Converter Float32Array para BLOB (armazenamento)
-function serializeVector(vec: Float32Array): ArrayBuffer {
-  return vec.buffer;
-}
+// Inserir embedding
+db.prepare(`
+  INSERT INTO vectors (chunk_id, embedding)
+  VALUES (?, ?)
+`).run(chunkId, float32ArrayToBuffer(embedding));
 
-// Converter BLOB para Float32Array (leitura)
-function deserializeVector(blob: ArrayBuffer): Float32Array {
-  return new Float32Array(blob);
-}
+// Busca KNN (K-Nearest Neighbors)
+const results = db.prepare(`
+  SELECT chunk_id, distance
+  FROM vectors
+  WHERE embedding MATCH ?
+  ORDER BY distance
+  LIMIT ?
+`).all(float32ArrayToBuffer(queryEmbedding), topK);
 
-// Armazenamento otimizado em lote
-async function storeVectors(
-  db: Database,
-  vectors: Array<{ chunkId: string; embedding: Float32Array }>
-): Promise<void> {
-  const stmt = db.prepare(
-    'INSERT INTO vectors (id, chunk_id, embedding) VALUES (?, ?, ?)'
-  );
-
-  db.transaction(() => {
-    for (const { chunkId, embedding } of vectors) {
-      stmt.run(generateId(), chunkId, serializeVector(embedding));
-    }
-  })();
-}
+// Busca híbrida: sqlite-vec + FTS5
+const hybridResults = db.prepare(`
+  WITH semantic AS (
+    SELECT chunk_id, distance as sem_score
+    FROM vectors
+    WHERE embedding MATCH ?
+    ORDER BY distance
+    LIMIT ?
+  ),
+  keyword AS (
+    SELECT chunk_id, rank as fts_score
+    FROM chunks_fts
+    WHERE content MATCH ?
+    LIMIT ?
+  )
+  SELECT
+    COALESCE(s.chunk_id, k.chunk_id) as chunk_id,
+    s.sem_score,
+    k.fts_score,
+    (0.7 * COALESCE(s.sem_score, 1.0) + 0.3 * COALESCE(k.fts_score, 0)) as combined
+  FROM semantic s
+  FULL OUTER JOIN keyword k ON s.chunk_id = k.chunk_id
+  ORDER BY combined
+  LIMIT ?
+`).all(queryEmbedding, topK, queryText, topK, topK);
 ```
 
 ---
 
 ## 4. APIs e Interfaces
 
-### 4.1 Core Services
+### 4.1 IPC Bridge (contextBridge)
+
+```typescript
+// preload/index.ts — expõe APIs seguras para o renderer
+contextBridge.exposeInMainWorld('api', {
+  // Import
+  importChat: (filePath: string) => ipcRenderer.invoke('import:chat', filePath),
+  onImportProgress: (cb: (progress: ImportProgress) => void) =>
+    ipcRenderer.on('import:progress', (_, data) => cb(data)),
+
+  // Search
+  search: (query: string, options?: SearchOptions) =>
+    ipcRenderer.invoke('search:query', query, options),
+
+  // RAG
+  askRAG: (question: string, options?: RAGOptions) =>
+    ipcRenderer.invoke('rag:query', question, options),
+  onRAGToken: (cb: (token: string) => void) =>
+    ipcRenderer.on('rag:token', (_, token) => cb(token)),
+  onRAGDone: (cb: (response: RAGResponse) => void) =>
+    ipcRenderer.on('rag:done', (_, response) => cb(response)),
+
+  // Chats
+  getChats: () => ipcRenderer.invoke('chats:list'),
+  deleteChat: (chatId: string) => ipcRenderer.invoke('chats:delete', chatId),
+
+  // Settings
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  updateSettings: (settings: Partial<UserSettings>) =>
+    ipcRenderer.invoke('settings:update', settings),
+
+  // System
+  getSystemInfo: () => ipcRenderer.invoke('system:info'),
+  openFile: () => ipcRenderer.invoke('dialog:openFile'),
+});
+```
+
+### 4.2 Core Services (Main Process)
 
 ```typescript
 // ==========================================
 // ChatImportService
 // ==========================================
 interface ChatImportService {
-  // Importa arquivo .txt do WhatsApp
-  importFromFile(uri: string): Promise<ImportResult>;
-
-  // Verifica se chat já foi importado (por hash)
+  importFromFile(filePath: string): Promise<ImportResult>;
+  importFromZip(zipPath: string): Promise<ImportResult>;
   isDuplicate(fileHash: string): Promise<boolean>;
-
-  // Retorna progresso da importação
   getProgress(): ImportProgress;
-
-  // Cancela importação em andamento
   cancel(): void;
 }
 
@@ -232,18 +335,16 @@ interface ImportProgress {
 // SearchService
 // ==========================================
 interface SearchService {
-  // Busca semântica por query
   search(query: string, options?: SearchOptions): Promise<SearchResult[]>;
-
-  // Busca híbrida (semântica + keyword)
   hybridSearch(query: string, options?: HybridSearchOptions): Promise<SearchResult[]>;
 }
 
 interface SearchOptions {
-  chatIds?: string[];      // Filtrar por chats específicos
-  topK?: number;           // Número de resultados (default: 5)
-  minScore?: number;       // Score mínimo (default: 0.5)
-  dateRange?: DateRange;   // Filtrar por período
+  chatIds?: string[];
+  topK?: number;
+  minScore?: number;
+  dateRange?: DateRange;
+  sender?: string;
 }
 
 interface SearchResult {
@@ -257,44 +358,41 @@ interface SearchResult {
 }
 
 // ==========================================
-// LLMService
+// LLMService (Utility Process)
 // ==========================================
 interface LLMService {
-  // Inicializa o modelo (cold start)
   initialize(): Promise<void>;
-
-  // Verifica se modelo está pronto
   isReady(): boolean;
-
-  // Gera resposta baseada em contexto
   generate(prompt: string, options?: GenerateOptions): Promise<string>;
-
-  // Gera resposta com streaming
   generateStream(
     prompt: string,
     onToken: (token: string) => void,
     options?: GenerateOptions
   ): Promise<void>;
-
-  // Libera recursos do modelo
   dispose(): void;
+  getModelInfo(): ModelInfo;
 }
 
 interface GenerateOptions {
-  maxTokens?: number;      // Max tokens na resposta (default: 256)
-  temperature?: number;    // Criatividade (default: 0.3)
-  topP?: number;           // Nucleus sampling (default: 0.9)
+  maxTokens?: number;
+  temperature?: number;
+  topP?: number;
   stopSequences?: string[];
+}
+
+interface ModelInfo {
+  name: string;
+  size: number;
+  quantization: string;
+  gpuAccelerated: boolean;
+  gpuBackend?: 'cuda' | 'metal' | 'vulkan' | 'cpu';
 }
 
 // ==========================================
 // RAGService (Orquestrador)
 // ==========================================
 interface RAGService {
-  // Fluxo completo: query -> busca -> LLM -> resposta
   query(question: string, options?: RAGOptions): Promise<RAGResponse>;
-
-  // Fluxo com streaming
   queryStream(
     question: string,
     onToken: (token: string) => void,
@@ -305,7 +403,8 @@ interface RAGService {
 interface RAGOptions {
   chatIds?: string[];
   topK?: number;
-  includeContext?: boolean;  // Retornar chunks usados
+  includeContext?: boolean;
+  hybridSearch?: boolean;
 }
 
 interface RAGResponse {
@@ -327,93 +426,123 @@ interface RAGResponse {
 
 ```
 recall-ai/
-├── app/                          # Expo Router (telas)
-│   ├── (tabs)/
-│   │   ├── index.tsx             # Home / Lista de chats
-│   │   ├── search.tsx            # Tela de busca principal
-│   │   └── settings.tsx          # Configurações
-│   ├── chat/
-│   │   └── [id].tsx              # Detalhes do chat
-│   ├── import.tsx                # Fluxo de importação
-│   └── _layout.tsx               # Layout principal
-│
 ├── src/
-│   ├── components/               # Componentes React
-│   │   ├── chat/
-│   │   │   ├── ChatBubble.tsx
-│   │   │   ├── ChatInput.tsx
-│   │   │   └── StreamingText.tsx
-│   │   ├── import/
-│   │   │   ├── FileSelector.tsx
-│   │   │   └── ProgressBar.tsx
-│   │   └── common/
-│   │       ├── Button.tsx
-│   │       └── Card.tsx
+│   ├── main/                          # Electron Main Process
+│   │   ├── index.ts                   # Entry point
+│   │   ├── ipc/                       # IPC handlers
+│   │   │   ├── chatHandlers.ts
+│   │   │   ├── searchHandlers.ts
+│   │   │   ├── importHandlers.ts
+│   │   │   └── llmHandlers.ts
+│   │   ├── services/                  # Backend services
+│   │   │   ├── ChatImportService.ts
+│   │   │   ├── SearchService.ts
+│   │   │   ├── LLMService.ts
+│   │   │   ├── RAGService.ts
+│   │   │   └── EmbeddingService.ts
+│   │   ├── core/                      # Core logic (portable → mobile later)
+│   │   │   ├── parser/
+│   │   │   │   ├── WhatsAppParser.ts
+│   │   │   │   ├── patterns.ts
+│   │   │   │   └── types.ts
+│   │   │   ├── chunking/
+│   │   │   │   ├── ChunkingStrategy.ts
+│   │   │   │   └── strategies/
+│   │   │   │       ├── TimeWindowStrategy.ts
+│   │   │   │       └── MessageStrategy.ts
+│   │   │   └── vector/
+│   │   │       └── VectorSearch.ts
+│   │   ├── db/                        # Database layer
+│   │   │   ├── database.ts            # better-sqlite3 connection
+│   │   │   ├── migrations/
+│   │   │   └── repositories/
+│   │   │       ├── ChatRepository.ts
+│   │   │       ├── MessageRepository.ts
+│   │   │       ├── ChunkRepository.ts
+│   │   │       └── VectorRepository.ts
+│   │   └── utils/
+│   │       ├── deviceDetection.ts
+│   │       ├── hash.ts
+│   │       ├── modelDownloader.ts
+│   │       └── tokenizer.ts
 │   │
-│   ├── services/                 # Lógica de negócio
-│   │   ├── ChatImportService.ts
-│   │   ├── SearchService.ts
-│   │   ├── LLMService.ts
-│   │   ├── RAGService.ts
-│   │   └── EmbeddingService.ts
+│   ├── preload/                       # Electron Preload
+│   │   └── index.ts                   # contextBridge API
 │   │
-│   ├── core/                     # Core logic
-│   │   ├── parser/
-│   │   │   ├── WhatsAppParser.ts
-│   │   │   ├── patterns.ts       # Regex patterns
-│   │   │   └── types.ts
-│   │   ├── chunking/
-│   │   │   ├── ChunkingStrategy.ts
-│   │   │   └── strategies/
-│   │   │       ├── TimeWindowStrategy.ts
-│   │   │       └── MessageStrategy.ts
-│   │   └── vector/
-│   │       ├── VectorSearch.ts
-│   │       └── CosineSimilarity.ts
+│   ├── renderer/                      # React Frontend
+│   │   ├── App.tsx
+│   │   ├── main.tsx
+│   │   ├── index.html
+│   │   ├── pages/
+│   │   │   ├── Home.tsx
+│   │   │   ├── Search.tsx
+│   │   │   ├── Chat.tsx
+│   │   │   ├── Import.tsx
+│   │   │   └── Settings.tsx
+│   │   ├── components/
+│   │   │   ├── ui/                    # Shadcn UI components
+│   │   │   │   ├── button.tsx
+│   │   │   │   ├── input.tsx
+│   │   │   │   ├── dialog.tsx
+│   │   │   │   ├── card.tsx
+│   │   │   │   └── ...
+│   │   │   ├── chat/
+│   │   │   │   ├── ChatBubble.tsx
+│   │   │   │   ├── ChatInput.tsx
+│   │   │   │   └── StreamingText.tsx
+│   │   │   ├── import/
+│   │   │   │   ├── DropZone.tsx
+│   │   │   │   └── ProgressBar.tsx
+│   │   │   ├── search/
+│   │   │   │   ├── SearchBar.tsx
+│   │   │   │   └── ResultCard.tsx
+│   │   │   └── layout/
+│   │   │       ├── Sidebar.tsx
+│   │   │       ├── TitleBar.tsx
+│   │   │       └── StatusBar.tsx
+│   │   ├── hooks/
+│   │   │   ├── useRAG.ts
+│   │   │   ├── useImport.ts
+│   │   │   ├── useSearch.ts
+│   │   │   └── useIPC.ts
+│   │   ├── store/
+│   │   │   ├── useAppStore.ts
+│   │   │   ├── useChatStore.ts
+│   │   │   └── useSearchStore.ts
+│   │   ├── styles/
+│   │   │   └── globals.css
+│   │   └── types/
+│   │       ├── chat.ts
+│   │       ├── search.ts
+│   │       ├── ai.ts
+│   │       └── ipc.ts
 │   │
-│   ├── db/                       # Database layer
-│   │   ├── database.ts           # Conexão op-sqlite
-│   │   ├── migrations/           # Migrações de schema
-│   │   └── repositories/
-│   │       ├── ChatRepository.ts
-│   │       ├── MessageRepository.ts
-│   │       ├── ChunkRepository.ts
-│   │       └── VectorRepository.ts
-│   │
-│   ├── store/                    # Estado global (Zustand)
-│   │   ├── useAppStore.ts
-│   │   ├── useChatStore.ts
-│   │   └── useSearchStore.ts
-│   │
-│   ├── hooks/                    # React hooks customizados
-│   │   ├── useRAG.ts
-│   │   ├── useImport.ts
-│   │   └── useSearch.ts
-│   │
-│   ├── utils/                    # Utilitários
-│   │   ├── hash.ts
-│   │   ├── tokenizer.ts
-│   │   └── formatters.ts
-│   │
-│   └── types/                    # TypeScript types
-│       ├── chat.ts
-│       ├── search.ts
-│       └── ai.ts
+│   └── shared/                        # Shared types (desktop + future mobile)
+│       ├── constants.ts
+│       └── types.ts
 │
-├── assets/
-│   ├── models/                   # Modelos de IA
-│   │   ├── all-MiniLM-L6-v2.tflite
-│   │   ├── gemma-270m-int4.bin
-│   │   └── tokenizers/
-│   └── fonts/
+├── models/                            # AI Models (gitignored, downloaded on first-run)
+│   ├── .gitkeep
+│   └── README.md                      # Download instructions
 │
-├── docs/                         # Documentação
-├── specs/                        # Especificações
-├── research/                     # Pesquisas e análises
+├── docs/
+│   ├── ARCHITECTURE.md
+│   └── ROADMAP.md
+├── specs/
+│   ├── TECH_SPEC.md
+│   └── SYSTEM_REQUIREMENTS.md
+├── research/
+│   ├── WHATSAPP_PARSING.md
+│   └── MODEL_BENCHMARKS.md
 │
-├── app.json                      # Config Expo
+├── electron.vite.config.ts
+├── electron-builder.yml
+├── tailwind.config.ts
+├── components.json                    # Shadcn UI config
 ├── package.json
 ├── tsconfig.json
+├── tsconfig.node.json
+├── tsconfig.web.json
 └── README.md
 ```
 
@@ -426,10 +555,10 @@ recall-ai/
 ```typescript
 interface AppMetrics {
   // Performance
-  embeddingLatency: number[];      // ms por embedding
-  searchLatency: number[];         // ms por busca
-  llmFirstToken: number[];         // ms até primeiro token
-  llmTokensPerSecond: number[];    // tokens/s
+  embeddingLatency: number[];
+  searchLatency: number[];
+  llmFirstToken: number[];
+  llmTokensPerSecond: number[];
 
   // Uso
   totalQueries: number;
@@ -437,15 +566,17 @@ interface AppMetrics {
   totalChunks: number;
   totalMessages: number;
 
-  // Qualidade (se implementar feedback)
+  // Qualidade (feedback)
   thumbsUp: number;
   thumbsDown: number;
 
-  // Device
-  deviceModel: string;
-  osVersion: string;
+  // System
+  platform: 'win32' | 'darwin' | 'linux';
+  arch: 'x64' | 'arm64';
+  gpuBackend: 'cuda' | 'metal' | 'vulkan' | 'cpu';
+  gpuName: string;
+  totalRAM: number;
   appVersion: string;
-  availableMemory: number;
 }
 ```
 
@@ -456,7 +587,7 @@ interface AppMetrics {
 interface LogEntry {
   timestamp: number;
   level: 'debug' | 'info' | 'warn' | 'error';
-  category: 'import' | 'search' | 'llm' | 'db' | 'ui';
+  category: 'import' | 'search' | 'llm' | 'db' | 'ui' | 'ipc';
   message: string;
   data?: Record<string, unknown>;
 }
@@ -473,22 +604,28 @@ interface UserSettings {
   fontSize: 'small' | 'medium' | 'large';
 
   // IA
-  llmTemperature: number;        // 0.1 - 1.0
-  maxResponseTokens: number;     // 128 - 512
-  topKResults: number;           // 3 - 10
+  llmTemperature: number;
+  maxResponseTokens: number;
+  topKResults: number;
+  modelPath?: string;            // Caminho para modelo customizado
 
   // Performance
-  enableGpuAcceleration: boolean;
-  batchSizeEmbedding: number;    // 4 - 16
+  gpuBackend: 'auto' | 'cuda' | 'metal' | 'vulkan' | 'cpu';
+  batchSizeEmbedding: number;
+
+  // Busca
+  hybridSearchAlpha: number;     // 0.0-1.0 (peso semântico vs keyword)
+  enableSearchHistory: boolean;
 
   // Privacidade
-  enableAnalytics: boolean;      // Métricas locais
-  enableCrashReports: boolean;   // Sempre local
+  enableAnalytics: boolean;      // Métricas locais apenas
+  enableCrashReports: boolean;
 
   // Armazenamento
   maxCacheSize: number;          // MB
   autoDeleteOldChats: boolean;
   retentionDays: number;
+  modelsDirectory: string;       // Caminho dos modelos GGUF
 }
 ```
 
@@ -499,24 +636,35 @@ interface UserSettings {
 ```json
 {
   "dependencies": {
-    "expo": "~52.0.0",
-    "expo-router": "~3.0.0",
-    "expo-file-system": "~17.0.0",
-    "expo-document-picker": "~12.0.0",
-    "react": "18.3.1",
-    "react-native": "0.76.0",
-    "react-native-reanimated": "~3.16.0",
-    "@op-engineering/op-sqlite": "^latest",
-    "react-native-fast-tflite": "^latest",
-    "zustand": "^4.5.0",
+    "electron": "^33.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.0.0",
+    "better-sqlite3": "^latest",
+    "node-llama-cpp": "^latest",
+    "zustand": "^5.0.0",
     "@tanstack/react-query": "^5.0.0",
-    "nanoid": "^5.0.0"
+    "framer-motion": "^latest",
+    "nanoid": "^5.0.0",
+    "electron-updater": "^latest"
   },
   "devDependencies": {
-    "@types/react": "~18.3.0",
-    "typescript": "~5.6.0",
-    "jest": "^29.0.0",
-    "@testing-library/react-native": "^12.0.0"
+    "electron-vite": "^latest",
+    "electron-builder": "^latest",
+    "@types/react": "^19.0.0",
+    "@types/better-sqlite3": "^latest",
+    "typescript": "~5.7.0",
+    "tailwindcss": "^4.0.0",
+    "@radix-ui/react-dialog": "^latest",
+    "@radix-ui/react-dropdown-menu": "^latest",
+    "@radix-ui/react-select": "^latest",
+    "@radix-ui/react-tooltip": "^latest",
+    "class-variance-authority": "^latest",
+    "clsx": "^latest",
+    "tailwind-merge": "^latest",
+    "lucide-react": "^latest",
+    "vitest": "^latest",
+    "@playwright/test": "^latest"
   }
 }
 ```
@@ -525,13 +673,30 @@ interface UserSettings {
 
 ## 9. Requisitos de Build
 
-### iOS
-- Xcode 15+
-- iOS 15.0+ (deployment target)
-- CocoaPods
+### Windows
+- Node.js 20+
+- Visual Studio Build Tools (para compilar better-sqlite3)
+- CUDA Toolkit (opcional, para aceleração NVIDIA)
 
-### Android
-- Android Studio Hedgehog+
-- Android SDK 24+ (minSdk)
-- Android SDK 34 (targetSdk)
-- NDK para compilar módulos nativos
+### macOS
+- Node.js 20+
+- Xcode Command Line Tools
+- Metal suportado nativamente (Apple Silicon e Intel com dGPU)
+
+### Linux
+- Node.js 20+
+- build-essential, python3 (para compilar módulos nativos)
+- CUDA Toolkit ou Vulkan SDK (opcional)
+
+### Download de Modelos (First-Run)
+
+Os modelos de IA são baixados automaticamente na primeira execução:
+
+| Modelo | Tamanho | URL |
+|--------|---------|-----|
+| all-MiniLM-L6-v2.gguf | ~25MB | HuggingFace |
+| gemma-3-270m-int4.gguf | ~150MB | HuggingFace |
+
+**Total do download inicial:** ~175MB
+
+Após o download, o app funciona 100% offline.

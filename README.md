@@ -1,10 +1,11 @@
 # Recall.ai
 
-> **Mobile-First Offline RAG** — Busca semântica e IA generativa 100% on-device para conversas de mensageiros.
+> **Desktop-First Offline RAG** — Busca semântica e IA generativa 100% local para conversas de mensageiros.
 
 [![Status](https://img.shields.io/badge/status-em%20desenvolvimento-yellow)]()
-[![Stack](https://img.shields.io/badge/stack-React%20Native%20%7C%20LiteRT%20%7C%20Gemma-blue)]()
+[![Stack](https://img.shields.io/badge/stack-Electron%20%7C%20React%20%7C%20node--llama--cpp-blue)]()
 [![Privacy](https://img.shields.io/badge/privacy-100%25%20offline-green)]()
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)]()
 
 ---
 
@@ -19,6 +20,9 @@ O Recall.ai usa **busca semântica** (entende significado, não apenas palavras)
 - Encontrar mensagens por contexto e significado
 - Responder perguntas sobre suas conversas
 - Funcionar 100% offline, sem enviar dados para nuvem
+- Rodar inteiramente no seu computador (Windows, macOS ou Linux)
+
+> **Roadmap:** A v1.0 é uma aplicação **desktop (Electron)**. A v2.0 trará suporte **mobile** via React Native.
 
 ---
 
@@ -26,11 +30,11 @@ O Recall.ai usa **busca semântica** (entende significado, não apenas palavras)
 
 | Documento | Descrição |
 |-----------|-----------|
-| [Arquitetura (SDD)](./docs/ARCHITECTURE.md) | Visão técnica completa do sistema |
+| [Arquitetura (SDD)](./docs/ARCHITECTURE.md) | Visão técnica completa do sistema desktop |
 | [Especificações Técnicas](./specs/TECH_SPEC.md) | Stack, modelos, e decisões técnicas |
-| [Compatibilidade](./specs/DEVICE_COMPATIBILITY.md) | Requisitos e otimizações por dispositivo |
+| [Requisitos de Sistema](./specs/SYSTEM_REQUIREMENTS.md) | Requisitos de hardware e compatibilidade |
 | [Roadmap](./docs/ROADMAP.md) | Fases de desenvolvimento detalhadas |
-| [Pesquisa: Parsing](./research/WHATSAPP_PARSING.md) | Análise do formato de exportação |
+| [Pesquisa: Parsing](./research/WHATSAPP_PARSING.md) | Análise do formato de exportação WhatsApp |
 | [Pesquisa: Modelos](./research/MODEL_BENCHMARKS.md) | Benchmarks de modelos on-device |
 
 ---
@@ -45,39 +49,52 @@ cd recall-ai
 # Instale dependências
 npm install
 
-# Baixe os modelos (após setup inicial)
-npm run download-models
+# Execute em modo de desenvolvimento
+npm run dev
 
-# Execute
-npm run start
+# Build para produção
+npm run build
 ```
+
+> **Nota:** Na primeira execução, o app fará download dos modelos de IA (~200MB). Após isso, funciona 100% offline.
 
 ---
 
 ## Stack Principal
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                    RECALL.AI                        │
-├─────────────────────────────────────────────────────┤
-│  Frontend        │ React Native (Expo) + TypeScript │
-│  Estado          │ Zustand + React Query            │
-│  Database        │ op-sqlite (JSI bindings)         │
-│  Vector Search   │ Cosine Similarity (otimizado)    │
-│  ML Runtime      │ Google LiteRT                    │
-│  Embedding       │ all-MiniLM-L6-v2 (~25MB)         │
-│  LLM             │ Gemma 3 270M INT4 (~150MB)       │
-└─────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                       RECALL.AI v1.0                         │
+├─────────────────────────────────────────────────────────────┤
+│  Shell             │ Electron 33+                            │
+│  Frontend          │ React 19 + TypeScript                   │
+│  Build             │ electron-vite                            │
+│  UI Components     │ Shadcn UI (Radix + Tailwind)            │
+│  Estado            │ Zustand + TanStack Query                │
+│  Database          │ better-sqlite3 + sqlite-vec + FTS5      │
+│  ML Runtime        │ node-llama-cpp (GGUF)                   │
+│  Embedding         │ all-MiniLM-L6-v2 (~25MB)               │
+│  LLM              │ Gemma 3 270M INT4 (~150MB)              │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Princípios de Design
 
-1. **Privacy by Design** — Dados nunca saem do dispositivo
-2. **Offline First** — Funciona sem internet após setup
-3. **Device Agnostic** — Roda em 80%+ dos smartphones (2020+)
-4. **Graceful Degradation** — Fallbacks inteligentes para devices fracos
+1. **Privacy by Design** — Dados nunca saem do computador do usuário
+2. **Offline First** — Funciona sem internet após download inicial dos modelos
+3. **Desktop First** — Aproveita o poder de hardware do desktop para IA de qualidade
+4. **Graceful Degradation** — Fallbacks inteligentes conforme hardware disponível
+
+---
+
+## Versões Planejadas
+
+| Versão | Plataforma | Status |
+|--------|-----------|--------|
+| v1.0 | Desktop (Electron) — Windows, macOS, Linux | 🟡 Em desenvolvimento |
+| v2.0 | Mobile (React Native) — Android, iOS | 🔵 Planejado |
 
 ---
 
