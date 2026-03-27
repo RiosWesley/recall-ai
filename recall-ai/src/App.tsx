@@ -6,8 +6,9 @@ import ImportPage from './pages/Import'
 import SearchPage from './pages/Search'
 import ChatPage from './pages/Chat'
 import SettingsPage from './pages/Settings'
+import PeoplePage from './pages/People'
 
-export type Page = 'home' | 'import' | 'search' | 'chat' | 'settings'
+export type Page = 'home' | 'import' | 'search' | 'chat' | 'settings' | 'people'
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState<Page>('home')
@@ -25,6 +26,7 @@ export default function App() {
       case 'search': return <SearchPage navigate={navigate} activeChatId={activeChatId} />
       case 'chat': return <ChatPage navigate={navigate} chatId={activeChatId} />
       case 'settings': return <SettingsPage />
+      case 'people': return <PeoplePage navigate={navigate} />
       default: return <HomePage navigate={navigate} />
     }
   }

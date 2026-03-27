@@ -291,7 +291,26 @@ Critérios de Aceitação:
 | Busca "foto do restaurante" | |
 | Thumbnail preview nos resultados | |
 
-### v1.3 — Smart Features (2 semanas)
+### v1.3 — People Graph (3 semanas)
+
+> **Objetivo:** Transformar o Recall.ai de motor de busca em **memória digital relacional**. O grafo de pessoas é a feature mais diferenciadora do produto.
+
+| Task | Descrição |
+|------|-----------|
+| Extração de pessoas via senders (Parser → Person entities) | Semana 1 |
+| Deduplicação de aliases por similaridade de string | Semana 1 |
+| Schema SQLite: persons, person_relations, key_memories | Semana 1 |
+| IPC handlers: getPersons, getPersonRelations, getKeyMemories | Semana 1 |
+| Cálculo de força de relação por co-occurrence | Semana 1 |
+| Tela People (grafo SVG interativo) | Semana 2 |
+| Painel de perfil: foto, bio, tags, memórias-chave | Semana 2 |
+| Upload de foto local via diálogo Electron | Semana 2 |
+| NER via LLM: extração de pessoas mencionadas nos chunks | Semana 3 |
+| Merge NER entities com sender-based persons | Semana 3 |
+| Key memories: ranquear chunks por relevância por pessoa | Semana 3 |
+| Filtros no grafo: por chat, por tag, por período | Semana 3 |
+
+### v1.4 — Smart Features (2 semanas)
 
 | Task | Descrição |
 |------|-----------|

@@ -106,19 +106,18 @@ export default function ChatPage({ chatId }: ChatPageProps) {
         <BrainCircuit size={15} style={{ color: 'var(--accent-emerald)' }} />
         <div>
           <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)' }}>
-            RAG Conversation
+            Conversar com sua memória
           </div>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)' }}>
-            Gemma 3 270M · MiniLM-L6-v2 · CPU
+            {chatId ? `Conversa · ${chatId}` : 'Todas as fontes'}
           </div>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
           <span className="badge badge--emerald">
             <span className="status-dot status-dot--ready" style={{ width: '4px', height: '4px' }} />
-            Modelo pronto
+            Pronto
           </span>
-          <span className="badge badge--muted">Top-K: 5</span>
-          <span className="badge badge--muted">α: 0.7</span>
+          <span className="badge badge--muted">● Offline· Local</span>
         </div>
       </div>
 

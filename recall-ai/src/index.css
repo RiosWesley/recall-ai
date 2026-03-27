@@ -1136,3 +1136,64 @@ code, pre, .mono {
   border-top-left-radius: 8px;
   border-top-right-radius: 8px;
 }
+
+/* ─── People Graph ─── */
+
+/* Slide-in animation for person panel */
+@keyframes slideInRight {
+  from {
+    transform: translateX(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.person-panel {
+  animation: slideInRight 0.25s ease forwards;
+}
+
+/* Avatar upload overlay hover */
+.avatar-upload-overlay {
+  opacity: 0 !important;
+}
+
+div:hover > .avatar-upload-overlay {
+  opacity: 1 !important;
+}
+
+/* Node pulse animation for the SVG graph */
+@keyframes nodePulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+
+@keyframes edgeDash {
+  from { stroke-dashoffset: 20; }
+  to { stroke-dashoffset: 0; }
+}
+
+/* Stat card hover accent */
+.stat-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-card::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--accent-emerald), transparent);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.stat-card:hover::after {
+  opacity: 0.4;
+}
+

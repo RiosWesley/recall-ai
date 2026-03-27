@@ -271,3 +271,118 @@ Seja conciso e direto.
 <|context|>
 {chunks recuperados}
 <|end|>
+```
+
+---
+
+### 3.6 People Graph Engine
+
+**Responsabilidade:** Identificar, relacionar e persistir as pessoas presentes nas conversas importadas, construindo um grafo de memória relacional.
+
+> **Status (v1.0):** A identificação de pessoas usa os **senders** extraídos diretamente pelo Parser (sem NER por LLM). O grafo completo com NER e extração de contexto por IA é planejado para v1.3.
+
+#### Entidades do Grafo
+
+```typescript
+interface Person {
+  id: string;              // UUID gerado na importação
+  name: string;            // Nome canônico (ex: "Maria Silva")
+  aliases: string[];       // Variações detectadas (ex: ["Maria", "Mah"])
+  photoPath: string | null; // Path local para foto anexada pelo usuário
+  bio: string | null;      // Nota manual do usuário
+  tags: string[];          // Labels manuais (ex: ["família", "trabalho"])
+  messageCount: number;    // Total de mensagens nos chats importados
+  firstSeen: Date;         // Data da primeira mensagem registrada
+  lastSeen: Date;          // Data da mensagem mais recente
+  chats: string[];         // IDs dos chats onde aparece
+}
+
+interface PersonRelation {
+  id: string;
+  personAId: string;       // Origem da aresta
+  personBId: string;       // Destino da aresta (grafo não-direcional)
+  chatId: string;          // Chat onde interagem juntos
+  coOccurrenceCount: number; // Quantas vezes interagem no mesmo contexto
+  strength: number;        // 0.0 – 1.0 (normalizado)
+}
+
+interface KeyMemory {
+  id: string;
+  personId: string;        // Pessoa associada
+  chunkId: string;         // Chunk original da memória
+  content: string;         // Trecho da conversa
+  relevanceScore: number;  // Score de relevância semântica
+  timestamp: Date;
+}
+```
+
+#### Schema SQLite
+
+```sql
+CREATE TABLE persons (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  aliases     TEXT NOT NULL DEFAULT '[]',  -- JSON array
+  photo_path  TEXT,
+  bio         TEXT,
+  tags        TEXT NOT NULL DEFAULT '[]',  -- JSON array
+  msg_count   INTEGER DEFAULT 0,
+  first_seen  INTEGER,  -- Unix timestamp
+  last_seen   INTEGER,
+  chats       TEXT NOT NULL DEFAULT '[]'   -- JSON array of chat IDs
+);
+
+CREATE TABLE person_relations (
+  id                  TEXT PRIMARY KEY,
+  person_a_id         TEXT NOT NULL REFERENCES persons(id),
+  person_b_id         TEXT NOT NULL REFERENCES persons(id),
+  chat_id             TEXT,
+  co_occurrence_count INTEGER DEFAULT 1,
+  strength            REAL DEFAULT 0.5
+);
+
+CREATE TABLE key_memories (
+  id              TEXT PRIMARY KEY,
+  person_id       TEXT NOT NULL REFERENCES persons(id),
+  chunk_id        TEXT NOT NULL REFERENCES chunks(id),
+  content         TEXT NOT NULL,
+  relevance_score REAL,
+  timestamp       INTEGER
+);
+```
+
+#### Pipeline de Extração (v1.0 — Sender-based)
+
+```
+ParsedMessages ──► ExtractSenders ──► DeduplicatePersons ──► BuildRelations ──► SQLite
+
+1. Extrai todos os `sender` únicos dos ParsedMessages
+2. Normaliza nomes (trim, capitalização)
+3. Detecta aliases por similaridade de string (Levenshtein ≤ 2)
+4. Cria relações entre pessoas que aparecem no mesmo chat
+5. Calcula co_occurrence_count por janela de tempo (mesmo chunking window)
+6. Persiste entidades no banco
+```
+
+#### Pipeline de Extração (v1.3 — NER via LLM)
+
+```
+Chunks ──► LLM NER Prompt ──► ParsedEntities ──► MergeWithSenders ──► EnrichedPersons
+
+Prompt template:
+"Identifique TODAS as pessoas mencionadas neste trecho de conversa.
+Retorne JSON: [{name, role, context}]. Apenas pessoas reais mencionadas."
+```
+
+#### IPC: People Graph
+
+```typescript
+// Renderer → Main
+window.api.getPersons()                    // Lista todas as pessoas
+window.api.getPerson(personId)             // Detalhe de uma pessoa
+window.api.getPersonRelations()            // Todas as relações (para o grafo)
+window.api.getKeyMemories(personId)        // Memórias-chave de uma pessoa
+window.api.updatePersonPhoto(personId, filePath) // Anexar foto
+window.api.updatePersonBio(personId, bio)  // Editar bio
+window.api.updatePersonTags(personId, tags) // Editar tags
+```
