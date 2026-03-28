@@ -34,6 +34,7 @@ O Recall.ai usa **busca semântica** (entende significado, não apenas palavras)
 | [Especificações Técnicas](./specs/TECH_SPEC.md) | Stack, modelos, e decisões técnicas |
 | [Requisitos de Sistema](./specs/SYSTEM_REQUIREMENTS.md) | Requisitos de hardware e compatibilidade |
 | [Roadmap](./docs/ROADMAP.md) | Fases de desenvolvimento detalhadas |
+| [**Task Breakdown**](./docs/TASKS.md) | **Tasks granulares para execução em chats isolados** |
 | [Pesquisa: Parsing](./research/WHATSAPP_PARSING.md) | Análise do formato de exportação WhatsApp |
 | [Pesquisa: Modelos](./research/MODEL_BENCHMARKS.md) | Benchmarks de modelos on-device |
 
