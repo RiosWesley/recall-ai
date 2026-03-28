@@ -102,7 +102,7 @@ src/main/db/
 
 ---
 
-## [ ] TASK 1.2 — Repositories (Chat, Message, Chunk)
+## [x] TASK 1.2 — Repositories (Chat, Message, Chunk)
 
 **Objetivo:** Criar a camada de acesso a dados (repository pattern) para chats, messages e chunks.
 
