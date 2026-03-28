@@ -50,7 +50,7 @@ TASK 2.1 ──► TASK 2.2 ──► TASK 2.3 ──► TASK 2.4 ──► TASK
 
 ---
 
-## [ ] TASK 1.1 — Setup better-sqlite3 + Schema SQLite
+## [x] TASK 1.1 — Setup better-sqlite3 + Schema SQLite
 
 **Objetivo:** Configurar o banco de dados SQLite com better-sqlite3, sqlite-vec e FTS5 no Electron main process. Criar todo o schema, sistema de migrations e connection singleton.
 
@@ -1017,7 +1017,7 @@ autoUpdater.on('update-downloaded', () => { /* prompt restart */ })
 
 | Fase | Tasks | Concluídas | Status |
 |------|-------|-----------|--------|
-| **Fase 1** — Database & Parser | 4 | 0 | ⬜ Não iniciada |
+| **Fase 1** — Database & Parser | 4 | 1 | 🟡 Em andamento |
 | **Fase 2** — Embedding & Search | 5 | 0 | ⬜ Não iniciada |
 | **Fase 3** — LLM & RAG | 4 | 0 | ⬜ Não iniciada |
 | **Fase 4** — Polish & Features | 3 | 0 | ⬜ Não iniciada |

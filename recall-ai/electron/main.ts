@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import { DatabaseService } from '../src/main/db/database'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -68,4 +69,16 @@ app.on('activate', () => {
   }
 })
 
-app.whenReady().then(createWindow)
+app.on('before-quit', () => {
+  DatabaseService.close()
+})
+
+app.whenReady().then(() => {
+  // Initialize database on first access (lazy — creates file only when needed)
+  try {
+    DatabaseService.getInstance()
+  } catch (err) {
+    console.error('[Main] Failed to initialize database:', err)
+  }
+  createWindow()
+})

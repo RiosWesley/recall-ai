@@ -12,6 +12,15 @@ export default defineConfig({
     electron({
       main: {
         entry: 'electron/main.ts',
+        vite: {
+          build: {
+            rollupOptions: {
+              // Native modules must be treated as external —
+              // they cannot be bundled by Rollup/Vite
+              external: ['better-sqlite3', 'sqlite-vec'],
+            },
+          },
+        },
       },
       preload: {
         input: path.join(__dirname, 'electron/preload.ts'),
