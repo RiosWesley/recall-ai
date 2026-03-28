@@ -169,7 +169,7 @@ src/main/db/repositories/
 
 ---
 
-## [ ] TASK 1.3 — WhatsApp Parser + Chunking Engine
+## [x] TASK 1.3 — WhatsApp Parser + Chunking Engine
 
 **Objetivo:** Implementar o parser de arquivos exportados do WhatsApp (.txt) e o engine de chunking com estratégia `by_time_window`.
 
@@ -1017,7 +1017,7 @@ autoUpdater.on('update-downloaded', () => { /* prompt restart */ })
 
 | Fase | Tasks | Concluídas | Status |
 |------|-------|-----------|--------|
-| **Fase 1** — Database & Parser | 4 | 1 | 🟡 Em andamento |
+| **Fase 1** — Database & Parser | 4 | 3 | 🟡 Em andamento |
 | **Fase 2** — Embedding & Search | 5 | 0 | ⬜ Não iniciada |
 | **Fase 3** — LLM & RAG | 4 | 0 | ⬜ Não iniciada |
 | **Fase 4** — Polish & Features | 3 | 0 | ⬜ Não iniciada |
