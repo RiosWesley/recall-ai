@@ -18,8 +18,11 @@ import { DatabaseService } from '../db/database'
 import { ChatRepository } from '../db/repositories/ChatRepository'
 import { MessageRepository } from '../db/repositories/MessageRepository'
 import { ChunkRepository } from '../db/repositories/ChunkRepository'
+import { VectorRepository } from '../db/repositories/VectorRepository'
 import { WhatsAppParser } from '../core/parser/WhatsAppParser'
 import { ChunkingEngine } from '../core/chunking/ChunkingEngine'
+import { ModelManager } from './ModelManager'
+import { EmbeddingService } from './EmbeddingService'
 
 import type { ImportProgress, ImportResult } from '../../shared/types'
 import type { NewMessage, NewChunk } from '../../shared/types'
@@ -55,6 +58,9 @@ export class ChatImportService {
         }
       }
 
+      const chatName = basename(filePath).replace(/\.[^/.]+$/, '')
+      const chatId = nanoid()
+
       // ── Stage 2: Parsing ──────────────────────────────────────────────────
       emit({ stage: 'parsing', percent: 20, label: 'Parseando mensagens', detail: 'Extraindo mensagens do formato WhatsApp...' })
 
@@ -73,18 +79,72 @@ export class ChatImportService {
       emit({ stage: 'chunking', percent: 50, label: 'Segmentando chunks', detail: 'Agrupando mensagens por janela de tempo...' })
 
       const rawChunks = this.chunker.chunk(parseResult.messages)
+      
+      const newChunks: NewChunk[] = rawChunks.map((c) => ({
+        id: nanoid(),
+        chat_id: chatId,
+        content: c.content,
+        display_content: c.displayContent,
+        start_time: c.startTime,
+        end_time: c.endTime,
+        message_count: c.messageCount,
+        token_count: c.tokenCount,
+        participants: c.participants,
+      }))
 
       emit({ stage: 'chunking', percent: 65, label: 'Segmentando chunks', detail: `${rawChunks.length} chunks criados` })
 
-      // ── Stage 4: Storing ──────────────────────────────────────────────────
-      emit({ stage: 'storing', percent: 75, label: 'Salvando no banco', detail: 'Persistindo chat, mensagens e chunks...' })
+      // ── Stage 4: Embedding ────────────────────────────────────────────────
+      emit({ stage: 'embedding', percent: 66, label: 'Preparando IA', detail: 'Verificando motor de busca semântica...' })
 
-      // Derive chat name from filename (strip extension)
-      const chatName = basename(filePath).replace(/\.[^/.]+$/, '')
+      const modelManager = ModelManager.getInstance()
+      const isAvailable = await modelManager.isAvailable('embedding')
 
-      // Create chat record
-      const chatId = nanoid()
-      const chat = chatRepo.create({
+      if (!isAvailable) {
+        emit({ stage: 'embedding', percent: 66, label: 'Baixando modelo', detail: 'Iniciando download (apenas na 1ª vez)...' })
+        await modelManager.download('embedding', (progress) => {
+           const mbDownloaded = (progress.downloadedBytes / 1024 / 1024).toFixed(1)
+           const mbTotal = (progress.totalBytes / 1024 / 1024).toFixed(1)
+           emit({ 
+             stage: 'embedding', 
+             percent: 66 + Math.round(progress.percent * 0.08), // from 66 to 74%
+             label: 'Baixando modelo', 
+             detail: `${progress.percent}% — ${mbDownloaded}MB / ${mbTotal}MB` 
+           })
+        })
+      }
+
+      emit({ stage: 'embedding', percent: 74, label: 'Inicializando IA', detail: 'Carregando modelo na memória...' })
+      const embeddingService = EmbeddingService.getInstance()
+      await embeddingService.initialize()
+
+      const vectorsToInsert: { chunkId: string; embedding: Float32Array }[] = []
+      const BATCH_SIZE = 100
+      let processed = 0
+      
+      for (let i = 0; i < newChunks.length; i += BATCH_SIZE) {
+        const batch = newChunks.slice(i, i + BATCH_SIZE)
+        const texts = batch.map(c => c.content)
+        
+        const embeddings = await embeddingService.embedBatch(texts)
+        
+        for (let j = 0; j < batch.length; j++) {
+          vectorsToInsert.push({ chunkId: batch[j].id!, embedding: embeddings[j] })
+        }
+        
+        processed += batch.length
+        emit({ 
+          stage: 'embedding', 
+          percent: 74 + Math.round((processed / newChunks.length) * 11), // maps to 74-85%
+          label: 'Gerando embeddings', 
+          detail: `${processed} / ${newChunks.length} chunks` 
+        })
+      }
+
+      // ── Stage 5: Storing ──────────────────────────────────────────────────
+      emit({ stage: 'storing', percent: 85, label: 'Salvando no banco', detail: 'Persistindo dados da importação...' })
+
+      chatRepo.create({
         id: chatId,
         name: chatName,
         source: 'whatsapp',
@@ -95,7 +155,6 @@ export class ChatImportService {
         last_message_at: parseResult.stats.lastTimestamp ?? undefined,
       })
 
-      // Batch-insert messages
       const messageRepo = new MessageRepository(db)
       const newMessages: NewMessage[] = parseResult.messages.map((m) => ({
         id: nanoid(),
@@ -108,29 +167,20 @@ export class ChatImportService {
       }))
       messageRepo.insertBatch(newMessages)
 
-      emit({ stage: 'storing', percent: 88, label: 'Salvando no banco', detail: 'Indexando chunks no FTS5...' })
-
-      // Batch-insert chunks (also inserts into FTS5 in the same transaction)
+      emit({ stage: 'storing', percent: 90, label: 'Salvando no banco', detail: 'Indexando chunks no FTS5...' })
       const chunkRepo = new ChunkRepository(db)
-      const newChunks: NewChunk[] = rawChunks.map((c) => ({
-        id: nanoid(),
-        chat_id: chatId,
-        content: c.content,
-        display_content: c.displayContent,
-        start_time: c.startTime,
-        end_time: c.endTime,
-        message_count: c.messageCount,
-        token_count: c.tokenCount,
-        participants: c.participants,
-      }))
       chunkRepo.insertBatch(newChunks)
+
+      emit({ stage: 'storing', percent: 95, label: 'Salvando no banco', detail: 'Inserindo vetores semânticos no sqlite-vec...' })
+      const vectorRepo = new VectorRepository(db)
+      vectorRepo.insertBatch(vectorsToInsert)
 
       emit({ stage: 'done', percent: 100, label: 'Importação concluída', detail: `${parseResult.messages.length.toLocaleString('pt-BR')} mensagens indexadas` })
 
       return {
         success: true,
-        chatId: chat.id,
-        chatName: chat.name,
+        chatId: chatId,
+        chatName: chatName,
         messageCount: parseResult.messages.length,
         chunkCount: rawChunks.length,
       }

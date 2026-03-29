@@ -9,6 +9,7 @@ import { DatabaseService } from '../db/database'
 import { ChatRepository } from '../db/repositories/ChatRepository'
 import { MessageRepository } from '../db/repositories/MessageRepository'
 import { ChunkRepository } from '../db/repositories/ChunkRepository'
+import { VectorRepository } from '../db/repositories/VectorRepository'
 import type { Chat } from '../../shared/types'
 
 export function registerChatHandlers() {
@@ -26,7 +27,9 @@ export function registerChatHandlers() {
       const msgRepo = new MessageRepository(db)
       const chunkRepo = new ChunkRepository(db)
       const chatRepo = new ChatRepository(db)
+      const vectorRepo = new VectorRepository(db)
 
+      vectorRepo.deleteByChatId(chatId)
       chunkRepo.deleteByChatId(chatId)
       msgRepo.deleteByChatId(chatId)   // MessageRepository needs deleteByChatId — see below
       chatRepo.delete(chatId)

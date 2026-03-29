@@ -116,6 +116,7 @@ export type ImportStageId =
   | 'reading'
   | 'parsing'
   | 'chunking'
+  | 'embedding'
   | 'storing'
   | 'done'
   | 'error'

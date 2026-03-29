@@ -456,7 +456,7 @@ LIMIT ?
 
 ---
 
-## [ ] TASK 2.4 — Pipeline de Importação Completo
+## [x] TASK 2.4 — Pipeline de Importação Completo
 
 **Objetivo:** Integrar embedding na pipeline de importação. Ao importar .txt → parse → chunk → embed → store vetores.
 
