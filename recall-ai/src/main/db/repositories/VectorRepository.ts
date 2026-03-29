@@ -206,7 +206,17 @@ export class VectorRepository {
         WHERE type='table' AND name='vectors'
       `).get()
 
-      return tableExists !== undefined
+      if (!tableExists) {
+        console.log('[VectorRepository] Self-healing: creating missing vectors table')
+        this.db.exec(`
+          CREATE VIRTUAL TABLE IF NOT EXISTS vectors USING vec0(
+            chunk_id TEXT PRIMARY KEY,
+            embedding FLOAT[768]
+          );
+        `)
+      }
+
+      return true
     } catch {
       return false
     }

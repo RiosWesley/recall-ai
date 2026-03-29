@@ -89,7 +89,7 @@ const VIRTUAL_TABLES_SQL = `
   -- ============================================================
   CREATE VIRTUAL TABLE IF NOT EXISTS vectors USING vec0(
     chunk_id TEXT PRIMARY KEY,
-    embedding FLOAT[384]
+    embedding FLOAT[768]
   );
 
   -- ============================================================

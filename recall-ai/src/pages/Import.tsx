@@ -16,6 +16,7 @@ type ImportStage =
   | 'reading'
   | 'parsing'
   | 'chunking'
+  | 'embedding'
   | 'storing'
   | 'done'
   | 'error'
@@ -25,10 +26,11 @@ const PIPELINE_STAGES = [
   { id: 'reading'  as const, label: 'Lendo arquivo',       description: 'Lendo e calculando hash do arquivo' },
   { id: 'parsing'  as const, label: 'Parseando mensagens', description: 'Extraindo mensagens do formato WhatsApp' },
   { id: 'chunking' as const, label: 'Segmentando chunks',  description: 'Agrupando mensagens por janela de tempo' },
-  { id: 'storing'  as const, label: 'Salvando no banco',   description: 'Persistindo chunks no SQLite + FTS5' },
+  { id: 'embedding' as const, label: 'Processamento Semântico',  description: 'Rodando Llama localmente para gerar os Vetores (isso pode levar um tempo)' },
+  { id: 'storing'  as const, label: 'Salvando no banco',   description: 'Persistindo vetores no SQLite-Vec' },
 ]
 
-const STAGE_ORDER: ImportStage[] = ['reading', 'parsing', 'chunking', 'storing', 'done']
+const STAGE_ORDER: ImportStage[] = ['reading', 'parsing', 'chunking', 'embedding', 'storing', 'done']
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function ImportPage({ navigate }: ImportPageProps) {
@@ -36,6 +38,7 @@ export default function ImportPage({ navigate }: ImportPageProps) {
   const [stage, setStage]               = useState<ImportStage>('idle')
   const [fileName, setFileName]         = useState<string | null>(null)
   const [progress, setProgress]         = useState(0)
+  const [detailMsg, setDetailMsg]       = useState<string | null>(null)
   const [messageCount, setMessageCount] = useState(0)
   const [errorMsg, setErrorMsg]         = useState<string | null>(null)
 
@@ -51,6 +54,7 @@ export default function ImportPage({ navigate }: ImportPageProps) {
       } else {
         setStage(p.stage as ImportStage)
         setProgress(p.percent)
+        setDetailMsg(p.detail ?? null)
       }
     })
     return () => unsub()
@@ -107,6 +111,7 @@ export default function ImportPage({ navigate }: ImportPageProps) {
     setStage('idle')
     setFileName(null)
     setProgress(0)
+    setDetailMsg(null)
     setMessageCount(0)
     setErrorMsg(null)
   }
@@ -156,6 +161,7 @@ export default function ImportPage({ navigate }: ImportPageProps) {
           stageIndex={stageIndex}
           progress={progress}
           fileName={fileName!}
+          detailMsg={detailMsg}
         />
       )}
     </div>
@@ -253,8 +259,8 @@ function ErrorView({ message, reset }: { message: string; reset: () => void }) {
 }
 
 // ─── Progress View ────────────────────────────────────────────────────────────
-function ProgressView({ stage, stageIndex, progress, fileName }: {
-  stage: ImportStage, stageIndex: number, progress: number, fileName: string
+function ProgressView({ stage, stageIndex, progress, fileName, detailMsg }: {
+  stage: ImportStage, stageIndex: number, progress: number, fileName: string, detailMsg: string | null
 }) {
   return (
     <div style={{ animation: 'fadeInUp 0.3s ease' }}>
@@ -279,7 +285,12 @@ function ProgressView({ stage, stageIndex, progress, fileName }: {
                 </div>
                 <div style={{ flex: 1 }}>
                   <div className="progress-step__label">{s.label}</div>
-                  {isActive && <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginTop: '1px' }}>{s.description}</div>}
+                  {isActive && (
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      {s.description}
+                      {detailMsg && <div style={{ color: 'var(--accent-emerald)', marginTop: '6px', fontWeight: 600 }}>[ {detailMsg} ]</div>}
+                    </div>
+                  )}
                 </div>
                 {isActive && <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--accent-emerald-dim)' }}>Em andamento</div>}
               </div>

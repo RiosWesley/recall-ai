@@ -4,6 +4,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { runMigrations } from './migrations/001_initial'
 import { fileURLToPath } from 'node:url'
+import * as sqliteVec from 'sqlite-vec'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -52,43 +53,25 @@ export class DatabaseService {
     return db
   }
 
-  /**
-   * Loads the sqlite-vec extension for vector similarity search.
-   * If the extension binary is not found, continues gracefully
-   * (vector search will be unavailable until the model is downloaded).
-   */
   private static loadSqliteVec(db: Database.Database): void {
     try {
-      // Try to load sqlite-vec from multiple possible locations
-      const possiblePaths = [
-        path.join(app.getPath('userData'), 'vec0'),
-        path.join(process.resourcesPath ?? '', 'vec0'),
-        path.join(__dirname, 'vec0'),
-        // Development: look in node_modules
-        path.join(process.cwd(), 'node_modules', 'sqlite-vec', 'vec0'),
-      ]
-
-      // On Windows the extension is a .dll (no extension needed when using loadExtension)
       let loaded = false
-      for (const extPath of possiblePaths) {
-        if (fs.existsSync(extPath) || fs.existsSync(extPath + '.dll') ||
-            fs.existsSync(extPath + '.so') || fs.existsSync(extPath + '.dylib')) {
-          db.loadExtension(extPath)
-          loaded = true
-          console.log('[DB] sqlite-vec loaded from:', extPath)
-          break
-        }
+      try {
+        sqliteVec.load(db)
+        loaded = true
+        console.log('[DB] sqlite-vec loaded via NPM package')
+      } catch (e) {
+        console.warn('[DB] Failed to load sqlite-vec via NPM:', e)
       }
 
       if (!loaded) {
-        // Try loading by name (if it's in PATH / LD_LIBRARY_PATH)
+        // Try loading by name (if it's in PATH)
         try {
           db.loadExtension('vec0')
           loaded = true
           console.log('[DB] sqlite-vec loaded by name')
         } catch {
           console.warn('[DB] sqlite-vec not found — vector search will be unavailable.')
-          console.warn('[DB] Install sqlite-vec to enable semantic search.')
         }
       }
 
@@ -99,7 +82,6 @@ export class DatabaseService {
       }
     } catch (err) {
       console.error('[DB] Failed to load sqlite-vec:', err)
-      // Non-fatal — app continues without vector search
     }
   }
 

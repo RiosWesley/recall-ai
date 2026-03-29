@@ -10,7 +10,7 @@ export class EmbeddingService {
   private model: LlamaModel | null = null
   private context: any = null // LlamaEmbeddingContext type varies in exports depending on the wrapper
 
-  private isInitializing = false
+  private initPromise: Promise<void> | null = null
   private gpuAccelerated = false
 
   private constructor() {}
@@ -27,34 +27,42 @@ export class EmbeddingService {
    * via ModelManager, and allocates the embedding context.
    */
   async initialize(): Promise<void> {
-    if (this.isReady() || this.isInitializing) return
+    if (this.isReady()) return
+    if (this.initPromise) return this.initPromise
 
-    this.isInitializing = true
+    this.initPromise = (async () => {
+      try {
+        console.log('[EmbeddingService] Initializing node-llama-cpp runtime...')
+        this.llama = await getLlama()
+        
+        const gpuInfo = await detectGpu()
+        this.gpuAccelerated = gpuInfo.backend !== false
+        console.log(`[EmbeddingService] GPU Detected: ${gpuInfo.backend || 'none'}`)
+
+        console.log('[EmbeddingService] Resolving embedding model...')
+        const modelPath = await ModelManager.getInstance().resolve('embedding')
+        
+        this.model = await this.llama.loadModel({ 
+          modelPath,
+          // Since embeddings are fast, we can offload layers fully to GPU if available
+          gpuLayers: 'max'
+        })
+
+        this.context = await this.model.createEmbeddingContext({
+          contextSize: Math.max(4096, this.model.trainContextSize ?? 0)
+        })
+        
+        console.log(`[EmbeddingService] Initialization complete. Hardware acceleration: ${this.gpuAccelerated}`)
+      } catch (err) {
+        console.error('[EmbeddingService] Failed to initialize:', err)
+        throw err
+      }
+    })()
+
     try {
-      console.log('[EmbeddingService] Initializing node-llama-cpp runtime...')
-      this.llama = await getLlama()
-      
-      const gpuInfo = await detectGpu()
-      this.gpuAccelerated = gpuInfo.backend !== false
-      console.log(`[EmbeddingService] GPU Detected: ${gpuInfo.backend || 'none'}`)
-
-      console.log('[EmbeddingService] Resolving embedding model...')
-      const modelPath = await ModelManager.getInstance().resolve('embedding')
-      
-      this.model = await this.llama.loadModel({ 
-        modelPath,
-        // Since embeddings are fast, we can offload layers fully to GPU if available
-        gpuLayers: 'max'
-      })
-
-      this.context = await this.model.createEmbeddingContext()
-      
-      console.log(`[EmbeddingService] Initialization complete. Hardware acceleration: ${this.gpuAccelerated}`)
-    } catch (err) {
-      console.error('[EmbeddingService] Failed to initialize:', err)
-      throw err
+      await this.initPromise
     } finally {
-      this.isInitializing = false
+      this.initPromise = null
     }
   }
 
@@ -75,8 +83,14 @@ export class EmbeddingService {
       return new Float32Array(MODEL_REGISTRY.embedding.dimensions || 384)
     }
 
+    // Hard-cap the text length to avoid context size errors for monolithic messages.
+    // We explicitly set contextSize to 4096 tokens above (~16000 chars max).
+    // To be absolutely safe against token fragmentation, we cap at 10000 chars
+    // which is more than enough semantic info for any given chunk.
+    const safeText = text.length > 10000 ? text.substring(0, 10000) : text
+
     const start = performance.now()
-    const { vector } = await this.context.getEmbeddingFor(text)
+    const { vector } = await this.context.getEmbeddingFor(safeText)
     
     // Normalization ensures Euclidean distance maps effectively to Cosine Similarity
     const normalized = this.normalizeL2(vector)

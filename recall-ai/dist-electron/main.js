@@ -5,9 +5,11 @@ import { app, ipcMain, dialog, BrowserWindow } from "electron";
 import { fileURLToPath } from "node:url";
 import path, { basename } from "node:path";
 import Database from "better-sqlite3";
-import fs, { createReadStream } from "node:fs";
+import * as sqliteVec from "sqlite-vec";
 import { webcrypto, createHash } from "node:crypto";
+import fs, { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
+import { resolveModelFile, createModelDownloader, getLlama } from "node-llama-cpp";
 const MIGRATION_ID = "001_initial";
 const SCHEMA_SQL = `
   -- ============================================================
@@ -95,7 +97,7 @@ const VIRTUAL_TABLES_SQL = `
   -- ============================================================
   CREATE VIRTUAL TABLE IF NOT EXISTS vectors USING vec0(
     chunk_id TEXT PRIMARY KEY,
-    embedding FLOAT[384]
+    embedding FLOAT[768]
   );
 
   -- ============================================================
@@ -155,6 +157,8 @@ function isSqliteVecLoaded(db) {
     return false;
   }
 }
+const __filename$1 = fileURLToPath(import.meta.url);
+path.dirname(__filename$1);
 const _DatabaseService = class _DatabaseService {
   static getInstance() {
     if (_DatabaseService.db) {
@@ -177,28 +181,15 @@ const _DatabaseService = class _DatabaseService {
     console.log("[DB] Database ready");
     return db;
   }
-  /**
-   * Loads the sqlite-vec extension for vector similarity search.
-   * If the extension binary is not found, continues gracefully
-   * (vector search will be unavailable until the model is downloaded).
-   */
   static loadSqliteVec(db) {
     try {
-      const possiblePaths = [
-        path.join(app.getPath("userData"), "vec0"),
-        path.join(process.resourcesPath ?? "", "vec0"),
-        path.join(__dirname, "vec0"),
-        // Development: look in node_modules
-        path.join(process.cwd(), "node_modules", "sqlite-vec", "vec0")
-      ];
       let loaded = false;
-      for (const extPath of possiblePaths) {
-        if (fs.existsSync(extPath) || fs.existsSync(extPath + ".dll") || fs.existsSync(extPath + ".so") || fs.existsSync(extPath + ".dylib")) {
-          db.loadExtension(extPath);
-          loaded = true;
-          console.log("[DB] sqlite-vec loaded from:", extPath);
-          break;
-        }
+      try {
+        sqliteVec.load(db);
+        loaded = true;
+        console.log("[DB] sqlite-vec loaded via NPM package");
+      } catch (e) {
+        console.warn("[DB] Failed to load sqlite-vec via NPM:", e);
       }
       if (!loaded) {
         try {
@@ -207,7 +198,6 @@ const _DatabaseService = class _DatabaseService {
           console.log("[DB] sqlite-vec loaded by name");
         } catch {
           console.warn("[DB] sqlite-vec not found — vector search will be unavailable.");
-          console.warn("[DB] Install sqlite-vec to enable semantic search.");
         }
       }
       if (loaded) {
@@ -484,6 +474,197 @@ function deserializeChunk(row) {
     participants: row.participants ? JSON.parse(row.participants) : []
   };
 }
+class VectorRepository {
+  constructor(db) {
+    __publicField(this, "isAvailable");
+    this.db = db;
+    this.isAvailable = this.checkAvailability();
+  }
+  /**
+   * Store a chunk's embedding vector.
+   * @param chunkId - ID of the chunk being embedded
+   * @param embedding - Float32Array of length 384
+   */
+  insert(chunkId, embedding) {
+    if (!this.isAvailable) {
+      console.warn("[VectorRepository] sqlite-vec not available — skipping insert");
+      return;
+    }
+    const buffer = Buffer.from(embedding.buffer);
+    this.db.prepare(`
+      INSERT OR REPLACE INTO vectors (chunk_id, embedding)
+      VALUES (?, ?)
+    `).run(chunkId, buffer);
+  }
+  /**
+   * Store multiple chunks' embeddings in a single transaction.
+   * @param items - Array of { chunkId, embedding }
+   */
+  insertBatch(items) {
+    if (!this.isAvailable) {
+      console.warn("[VectorRepository] sqlite-vec not available — skipping batch insert");
+      return;
+    }
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO vectors (chunk_id, embedding)
+      VALUES (?, ?)
+    `);
+    this.db.transaction((vectors) => {
+      for (const item of vectors) {
+        stmt.run(item.chunkId, Buffer.from(item.embedding.buffer));
+      }
+    })(items);
+  }
+  /**
+   * Perform a KNN search for the closest chunks to a query embedding.
+   * @param queryEmbedding - Float32Array of length 384
+   * @param topK - Number of results to return
+   * @param chatId - Optional chat ID to filter results by
+   */
+  search(queryEmbedding, topK = 10, chatId) {
+    if (!this.isAvailable) {
+      console.warn("[VectorRepository] sqlite-vec not available — returning empty results");
+      return [];
+    }
+    const buffer = Buffer.from(queryEmbedding.buffer);
+    let sql = `
+      SELECT v.chunk_id, v.distance
+      FROM vectors v
+    `;
+    const params = [buffer];
+    if (chatId) {
+      sql += ` JOIN chunks c ON c.id = v.chunk_id
+      WHERE v.embedding MATCH ? AND c.chat_id = ? `;
+      params.push(chatId);
+    } else {
+      sql += ` WHERE v.embedding MATCH ? `;
+    }
+    sql += ` ORDER BY v.distance ASC LIMIT ? `;
+    params.push(topK);
+    const rows = this.db.prepare(sql).all(...params);
+    return rows;
+  }
+  /**
+   * Hybrid search: combines semantic similarity (KNN) with FTS5 keyword scoring
+   * utilizing the Reciprocal Rank Fusion (RRF) algorithm for robust score normalization.
+   * @param queryEmbedding - Float32Array of length 384
+   * @param queryText - Original query string for FTS5
+   * @param topK - Number of results
+   * @param alpha - Weight for semantic score (1 - alpha = FTS5 weight). Default 0.7
+   * @param chatId - Optional chat ID to filter results by
+   */
+  hybridSearch(queryEmbedding, queryText, topK = 10, alpha = 0.7, chatId) {
+    if (!this.isAvailable) {
+      return this.ftsOnly(queryText, topK, chatId);
+    }
+    const buffer = Buffer.from(queryEmbedding.buffer);
+    const beta = 1 - alpha;
+    const fetchCount = topK * 5;
+    const semTable = chatId ? "vectors v JOIN chunks c ON c.id = v.chunk_id" : "vectors v";
+    const semWhere = chatId ? "v.embedding MATCH ? AND c.chat_id = ?" : "v.embedding MATCH ?";
+    const kwTable = chatId ? "chunks_fts f JOIN chunks c ON c.id = f.chunk_id" : "chunks_fts f";
+    const kwWhere = chatId ? "f.content MATCH ? AND c.chat_id = ?" : "f.content MATCH ?";
+    const sql = `
+      WITH semantic AS (
+        SELECT v.chunk_id, v.distance as sem_dist,
+               row_number() OVER (ORDER BY v.distance ASC) as sem_rank
+        FROM ${semTable}
+        WHERE ${semWhere}
+        LIMIT ?
+      ),
+      keyword AS (
+        SELECT f.chunk_id, f.rank as kw_score,
+               row_number() OVER (ORDER BY f.rank ASC) as kw_rank
+        FROM ${kwTable}
+        WHERE ${kwWhere}
+        LIMIT ?
+      ),
+      combined AS (
+        SELECT
+          COALESCE(s.chunk_id, k.chunk_id) AS chunk_id,
+          (? * COALESCE(1.0 / (60.0 + s.sem_rank), 0.0))
+          + (? * COALESCE(1.0 / (60.0 + k.kw_rank), 0.0)) AS score
+        FROM semantic s
+        FULL OUTER JOIN keyword k ON s.chunk_id = k.chunk_id
+      )
+      SELECT chunk_id, (1.0 - score) AS distance
+      FROM combined
+      ORDER BY score DESC
+      LIMIT ?
+    `;
+    const params = [];
+    params.push(buffer);
+    if (chatId) params.push(chatId);
+    params.push(fetchCount);
+    params.push(queryText);
+    if (chatId) params.push(chatId);
+    params.push(fetchCount);
+    params.push(alpha);
+    params.push(beta);
+    params.push(topK);
+    const rows = this.db.prepare(sql).all(...params);
+    return rows;
+  }
+  /**
+   * Delete all vectors for a given chat's chunks.
+   */
+  deleteByChatId(chatId) {
+    if (!this.isAvailable) return;
+    const chunkIds = this.db.prepare(
+      "SELECT id FROM chunks WHERE chat_id = ?"
+    ).all(chatId);
+    if (chunkIds.length === 0) return;
+    const deleteStmt = this.db.prepare("DELETE FROM vectors WHERE chunk_id = ?");
+    const runAll = this.db.transaction(() => {
+      for (const { id } of chunkIds) {
+        deleteStmt.run(id);
+      }
+    });
+    runAll();
+  }
+  /** Returns true if the sqlite-vec extension is loaded and the vectors table exists. */
+  checkAvailability() {
+    try {
+      this.db.prepare("SELECT vec_version()").get();
+      const tableExists = this.db.prepare(`
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='vectors'
+      `).get();
+      if (!tableExists) {
+        console.log("[VectorRepository] Self-healing: creating missing vectors table");
+        this.db.exec(`
+          CREATE VIRTUAL TABLE IF NOT EXISTS vectors USING vec0(
+            chunk_id TEXT PRIMARY KEY,
+            embedding FLOAT[768]
+          );
+        `);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  /** Pure FTS5 fallback when sqlite-vec is unavailable. */
+  ftsOnly(queryText, topK, chatId) {
+    try {
+      let sql = "SELECT f.chunk_id, f.rank as distance FROM chunks_fts f";
+      const params = [];
+      if (chatId) {
+        sql += " JOIN chunks c ON c.id = f.chunk_id WHERE f.content MATCH ? AND c.chat_id = ?";
+        params.push(queryText, chatId);
+      } else {
+        sql += " WHERE f.content MATCH ?";
+        params.push(queryText);
+      }
+      sql += " ORDER BY f.rank LIMIT ?";
+      params.push(topK);
+      const rows = this.db.prepare(sql).all(...params);
+      return rows;
+    } catch {
+      return [];
+    }
+  }
+}
 function registerChatHandlers() {
   ipcMain.handle("chats:list", async () => {
     const db = DatabaseService.getInstance();
@@ -496,6 +677,8 @@ function registerChatHandlers() {
       const msgRepo = new MessageRepository(db);
       const chunkRepo = new ChunkRepository(db);
       const chatRepo = new ChatRepository(db);
+      const vectorRepo = new VectorRepository(db);
+      vectorRepo.deleteByChatId(chatId);
       chunkRepo.deleteByChatId(chatId);
       msgRepo.deleteByChatId(chatId);
       chatRepo.delete(chatId);
@@ -868,6 +1051,311 @@ class ChunkingEngine {
     return this.strategy.chunk(sorted);
   }
 }
+const MODEL_REGISTRY = {
+  /**
+   * nomic-embed-text-v1.5 — Extremely capable Semantic Embedding Model, 768 dimensions.
+   *
+   * Replaces 'all-MiniLM' to provide an industry-leading context window (8192 tokens),
+   * ensuring massive monolithic text chunks never overflow the context.
+   * Superior multimodal and varied-context search recall.
+   * Size: ~80MB (Q4_K_M).
+   *
+   * Repo: nomic-ai/nomic-embed-text-v1.5-GGUF
+   */
+  embedding: {
+    key: "embedding",
+    name: "nomic-embed-text-v1.5",
+    uri: "hf:nomic-ai/nomic-embed-text-v1.5-GGUF:Q4_K_M",
+    sizeEstimate: 8e7,
+    // ~80MB
+    purpose: "embedding",
+    dimensions: 768,
+    quantization: "Q4_K_M"
+  },
+  /**
+   * Gemma 3 270M IT — Instruction-tuned generative model.
+   *
+   * Q4_K_M strikes the optimal balance between inference speed and quality
+   * for a 270M parameter model. At this scale, quantization below Q4 becomes
+   * noticeably degraded; Q4_K_M maintains coherent output.
+   * Size: ~150MB
+   *
+   * Used in TASK 3.x (LLM service). Downloaded now so the user doesn't wait
+   * when they first use the chat feature.
+   *
+   * Repo: bartowski/google_gemma-3-270m-it-GGUF
+   */
+  llm: {
+    key: "llm",
+    name: "Gemma 3 270M IT",
+    uri: "hf:bartowski/google_gemma-3-270m-it-GGUF:Q4_K_M",
+    sizeEstimate: 15e7,
+    // ~150MB
+    purpose: "generation",
+    quantization: "Q4_K_M"
+  }
+};
+const MODEL_DOWNLOAD_ORDER = ["embedding", "llm"];
+const _ModelManager = class _ModelManager {
+  constructor() {
+    /** Absolute path to the models directory in Electron's userData */
+    __publicField(this, "modelsDir");
+    this.modelsDir = path.join(app.getPath("userData"), "models");
+    fs.mkdirSync(this.modelsDir, { recursive: true });
+  }
+  static getInstance() {
+    if (!_ModelManager.instance) {
+      _ModelManager.instance = new _ModelManager();
+    }
+    return _ModelManager.instance;
+  }
+  /**
+   * Checks whether a model file is present locally without triggering a download.
+   *
+   * resolveModelFile with `download: false` returns the expected local path
+   * without checking the network. We then verify the file actually exists on disk.
+   */
+  async isAvailable(key) {
+    try {
+      const modelPath = await resolveModelFile(MODEL_REGISTRY[key].uri, {
+        directory: this.modelsDir,
+        download: false,
+        // never trigger a download in a presence check
+        cli: false
+      });
+      return fs.existsSync(modelPath);
+    } catch {
+      return false;
+    }
+  }
+  /**
+   * Returns the status of all registered models.
+   * Runs availability checks in parallel for speed.
+   */
+  async checkAll() {
+    const statuses = await Promise.all(
+      MODEL_DOWNLOAD_ORDER.map(async (key) => {
+        const entry = MODEL_REGISTRY[key];
+        const available = await this.isAvailable(key);
+        let filePath;
+        if (available) {
+          try {
+            filePath = await resolveModelFile(entry.uri, {
+              directory: this.modelsDir,
+              download: false,
+              cli: false
+            });
+          } catch {
+          }
+        }
+        return {
+          key,
+          name: entry.name,
+          quantization: entry.quantization,
+          sizeEstimate: entry.sizeEstimate,
+          purpose: entry.purpose,
+          available,
+          filePath
+        };
+      })
+    );
+    return statuses;
+  }
+  /**
+   * Downloads a model with real-time progress reporting via the supplied callback.
+   *
+   * Uses node-llama-cpp's createModelDownloader which:
+   *  - Downloads via ipull (parallel connections, fast)
+   *  - Handles multi-part GGUF files automatically
+   *  - Resumes interrupted downloads
+   *  - Skips download if file already exists and size matches (skipExisting: true by default)
+   *
+   * @param key        - Which model to download
+   * @param onProgress - Optional callback called with progress on each chunk
+   * @returns          - Absolute path to the downloaded model entrypoint file
+   */
+  async download(key, onProgress) {
+    const entry = MODEL_REGISTRY[key];
+    console.log(`[ModelManager] Starting download: ${entry.name} (${entry.uri})`);
+    const downloader = await createModelDownloader({
+      modelUri: entry.uri,
+      dirPath: this.modelsDir,
+      showCliProgress: false,
+      onProgress: ({ totalSize, downloadedSize }) => {
+        if (onProgress) {
+          const total = totalSize ?? entry.sizeEstimate;
+          onProgress({
+            key,
+            name: entry.name,
+            downloadedBytes: downloadedSize,
+            totalBytes: total,
+            percent: total > 0 ? Math.round(downloadedSize / total * 100) : 0,
+            speed: 0
+            // ipull doesn't expose instantaneous speed in onProgress
+          });
+        }
+      }
+    });
+    const modelPath = await downloader.download();
+    console.log(`[ModelManager] Download complete: ${entry.name} → ${modelPath}`);
+    return modelPath;
+  }
+  /**
+   * Resolves the absolute file path for a model.
+   *
+   * If the model is not found locally, this will trigger an automatic download
+   * (silent — no progress callback). Prefer `download()` when you need UI feedback.
+   *
+   * Intended for use inside services (EmbeddingService, LLMService) to get
+   * the model path lazily at initialization time.
+   */
+  async resolve(key) {
+    const entry = MODEL_REGISTRY[key];
+    return resolveModelFile(entry.uri, {
+      directory: this.modelsDir,
+      download: "auto",
+      cli: false
+    });
+  }
+};
+__publicField(_ModelManager, "instance", null);
+let ModelManager = _ModelManager;
+async function detectGpu() {
+  const llama = await getLlama();
+  const backend = llama.gpu;
+  return {
+    vulkan: backend === "vulkan",
+    cuda: backend === "cuda",
+    metal: backend === "metal",
+    backend
+  };
+}
+const _EmbeddingService = class _EmbeddingService {
+  constructor() {
+    __publicField(this, "llama", null);
+    __publicField(this, "model", null);
+    __publicField(this, "context", null);
+    // LlamaEmbeddingContext type varies in exports depending on the wrapper
+    __publicField(this, "initPromise", null);
+    __publicField(this, "gpuAccelerated", false);
+  }
+  static getInstance() {
+    if (!_EmbeddingService.instance) {
+      _EmbeddingService.instance = new _EmbeddingService();
+    }
+    return _EmbeddingService.instance;
+  }
+  /**
+   * Lazily initializes the node-llama-cpp runtime, resolves the embedding model 
+   * via ModelManager, and allocates the embedding context.
+   */
+  async initialize() {
+    if (this.isReady()) return;
+    if (this.initPromise) return this.initPromise;
+    this.initPromise = (async () => {
+      try {
+        console.log("[EmbeddingService] Initializing node-llama-cpp runtime...");
+        this.llama = await getLlama();
+        const gpuInfo = await detectGpu();
+        this.gpuAccelerated = gpuInfo.backend !== false;
+        console.log(`[EmbeddingService] GPU Detected: ${gpuInfo.backend || "none"}`);
+        console.log("[EmbeddingService] Resolving embedding model...");
+        const modelPath = await ModelManager.getInstance().resolve("embedding");
+        this.model = await this.llama.loadModel({
+          modelPath,
+          // Since embeddings are fast, we can offload layers fully to GPU if available
+          gpuLayers: "max"
+        });
+        this.context = await this.model.createEmbeddingContext({
+          contextSize: Math.max(4096, this.model.trainContextSize ?? 0)
+        });
+        console.log(`[EmbeddingService] Initialization complete. Hardware acceleration: ${this.gpuAccelerated}`);
+      } catch (err) {
+        console.error("[EmbeddingService] Failed to initialize:", err);
+        throw err;
+      }
+    })();
+    try {
+      await this.initPromise;
+    } finally {
+      this.initPromise = null;
+    }
+  }
+  isReady() {
+    return this.model !== null && this.context !== null;
+  }
+  /**
+   * Generates an L2-normalized embedding for a single text block.
+   */
+  async embed(text) {
+    if (!this.isReady()) {
+      await this.initialize();
+    }
+    if (!text.trim()) {
+      return new Float32Array(MODEL_REGISTRY.embedding.dimensions);
+    }
+    const safeText = text.length > 1e4 ? text.substring(0, 1e4) : text;
+    const start = performance.now();
+    const { vector } = await this.context.getEmbeddingFor(safeText);
+    const normalized = this.normalizeL2(vector);
+    const floatArr = Float32Array.from(normalized);
+    const end = performance.now();
+    console.log(`[EmbeddingService] Embed single: ${Math.round(end - start)}ms`);
+    return floatArr;
+  }
+  /**
+   * Processes an array of text chunks sequentially to prevent VRAM overflow
+   * and context contention. Useful for bulk importing.
+   */
+  async embedBatch(texts) {
+    if (!this.isReady()) {
+      await this.initialize();
+    }
+    console.log(`[EmbeddingService] Starting batch embed for ${texts.length} items...`);
+    const start = performance.now();
+    const results = [];
+    for (const text of texts) {
+      results.push(await this.embed(text));
+    }
+    const end = performance.now();
+    console.log(`[EmbeddingService] Batch embed complete. Total items: ${texts.length}. Time: ${Math.round(end - start)}ms. Avg: ${Math.round((end - start) / texts.length)}ms/item.`);
+    return results;
+  }
+  /**
+   * Normalizes a vector to L2 unit length.
+   * This is mathematically required to treat Euclidean Distance as Cosine Distance.
+   */
+  normalizeL2(vector) {
+    const norm = Math.sqrt(vector.reduce((acc, val) => acc + val * val, 0));
+    if (norm === 0) return vector;
+    return vector.map((val) => val / norm);
+  }
+  getInfo() {
+    return {
+      modelName: MODEL_REGISTRY.embedding.name,
+      dimensions: MODEL_REGISTRY.embedding.dimensions,
+      gpuAccelerated: this.gpuAccelerated
+    };
+  }
+  /**
+   * Frees C++ bindings and clears VRAM. 
+   * MUST be called during application shutdown to avoid memory leaks.
+   */
+  dispose() {
+    if (this.context) {
+      this.context.dispose();
+      this.context = null;
+    }
+    if (this.model) {
+      this.model.dispose();
+      this.model = null;
+    }
+    this.llama = null;
+    console.log("[EmbeddingService] Disposed and cleared memory.");
+  }
+};
+__publicField(_EmbeddingService, "instance", null);
+let EmbeddingService = _EmbeddingService;
 class ChatImportService {
   constructor() {
     __publicField(this, "parser", new WhatsAppParser());
@@ -895,6 +1383,8 @@ class ChatImportService {
           error: "Este arquivo já foi importado anteriormente."
         };
       }
+      const chatName = basename(filePath).replace(/\.[^/.]+$/, "");
+      const chatId = nanoid();
       emit({ stage: "parsing", percent: 20, label: "Parseando mensagens", detail: "Extraindo mensagens do formato WhatsApp..." });
       const parseResult = await this.parser.parse(filePath);
       if (parseResult.messages.length === 0) {
@@ -906,11 +1396,59 @@ class ChatImportService {
       emit({ stage: "parsing", percent: 40, label: "Parseando mensagens", detail: `${parseResult.messages.length.toLocaleString("pt-BR")} mensagens encontradas` });
       emit({ stage: "chunking", percent: 50, label: "Segmentando chunks", detail: "Agrupando mensagens por janela de tempo..." });
       const rawChunks = this.chunker.chunk(parseResult.messages);
+      const newChunks = rawChunks.map((c) => ({
+        id: nanoid(),
+        chat_id: chatId,
+        content: c.content,
+        display_content: c.displayContent,
+        start_time: c.startTime,
+        end_time: c.endTime,
+        message_count: c.messageCount,
+        token_count: c.tokenCount,
+        participants: c.participants
+      }));
       emit({ stage: "chunking", percent: 65, label: "Segmentando chunks", detail: `${rawChunks.length} chunks criados` });
-      emit({ stage: "storing", percent: 75, label: "Salvando no banco", detail: "Persistindo chat, mensagens e chunks..." });
-      const chatName = basename(filePath).replace(/\.[^/.]+$/, "");
-      const chatId = nanoid();
-      const chat = chatRepo.create({
+      emit({ stage: "embedding", percent: 66, label: "Preparando IA", detail: "Verificando motor de busca semântica..." });
+      const modelManager = ModelManager.getInstance();
+      const isAvailable = await modelManager.isAvailable("embedding");
+      if (!isAvailable) {
+        emit({ stage: "embedding", percent: 66, label: "Baixando modelo", detail: "Iniciando download (apenas na 1ª vez)..." });
+        await modelManager.download("embedding", (progress) => {
+          const mbDownloaded = (progress.downloadedBytes / 1024 / 1024).toFixed(1);
+          const mbTotal = (progress.totalBytes / 1024 / 1024).toFixed(1);
+          emit({
+            stage: "embedding",
+            percent: 66 + Math.round(progress.percent * 0.08),
+            // from 66 to 74%
+            label: "Baixando modelo",
+            detail: `${progress.percent}% — ${mbDownloaded}MB / ${mbTotal}MB`
+          });
+        });
+      }
+      emit({ stage: "embedding", percent: 74, label: "Inicializando IA", detail: "Carregando modelo na memória..." });
+      const embeddingService = EmbeddingService.getInstance();
+      await embeddingService.initialize();
+      const vectorsToInsert = [];
+      const BATCH_SIZE = 100;
+      let processed = 0;
+      for (let i = 0; i < newChunks.length; i += BATCH_SIZE) {
+        const batch = newChunks.slice(i, i + BATCH_SIZE);
+        const texts = batch.map((c) => c.content);
+        const embeddings = await embeddingService.embedBatch(texts);
+        for (let j = 0; j < batch.length; j++) {
+          vectorsToInsert.push({ chunkId: batch[j].id, embedding: embeddings[j] });
+        }
+        processed += batch.length;
+        emit({
+          stage: "embedding",
+          percent: 74 + Math.round(processed / newChunks.length * 11),
+          // maps to 74-85%
+          label: "Gerando embeddings",
+          detail: `${processed} / ${newChunks.length} chunks`
+        });
+      }
+      emit({ stage: "storing", percent: 85, label: "Salvando no banco", detail: "Persistindo dados da importação..." });
+      chatRepo.create({
         id: chatId,
         name: chatName,
         source: "whatsapp",
@@ -931,25 +1469,17 @@ class ChatImportService {
         raw: m.raw
       }));
       messageRepo.insertBatch(newMessages);
-      emit({ stage: "storing", percent: 88, label: "Salvando no banco", detail: "Indexando chunks no FTS5..." });
+      emit({ stage: "storing", percent: 90, label: "Salvando no banco", detail: "Indexando chunks no FTS5..." });
       const chunkRepo = new ChunkRepository(db);
-      const newChunks = rawChunks.map((c) => ({
-        id: nanoid(),
-        chat_id: chatId,
-        content: c.content,
-        display_content: c.displayContent,
-        start_time: c.startTime,
-        end_time: c.endTime,
-        message_count: c.messageCount,
-        token_count: c.tokenCount,
-        participants: c.participants
-      }));
       chunkRepo.insertBatch(newChunks);
+      emit({ stage: "storing", percent: 95, label: "Salvando no banco", detail: "Inserindo vetores semânticos no sqlite-vec..." });
+      const vectorRepo = new VectorRepository(db);
+      vectorRepo.insertBatch(vectorsToInsert);
       emit({ stage: "done", percent: 100, label: "Importação concluída", detail: `${parseResult.messages.length.toLocaleString("pt-BR")} mensagens indexadas` });
       return {
         success: true,
-        chatId: chat.id,
-        chatName: chat.name,
+        chatId,
+        chatName,
         messageCount: parseResult.messages.length,
         chunkCount: rawChunks.length
       };
@@ -988,9 +1518,116 @@ function registerImportHandlers(win2) {
     return result.filePaths[0];
   });
 }
+function registerModelHandlers(win2) {
+  const manager = ModelManager.getInstance();
+  ipcMain.handle("models:check", async () => {
+    return manager.checkAll();
+  });
+  ipcMain.handle("models:download", async (_, key) => {
+    return manager.download(key, (progress) => {
+      if (!win2.isDestroyed()) {
+        win2.webContents.send("models:progress", progress);
+      }
+    });
+  });
+}
+const _SearchService = class _SearchService {
+  constructor() {
+    __publicField(this, "chatRepo");
+    __publicField(this, "chunkRepo");
+    __publicField(this, "vectorRepo");
+    const db = DatabaseService.getInstance();
+    this.chatRepo = new ChatRepository(db);
+    this.chunkRepo = new ChunkRepository(db);
+    this.vectorRepo = new VectorRepository(db);
+  }
+  static getInstance() {
+    if (!_SearchService.instance) {
+      _SearchService.instance = new _SearchService();
+    }
+    return _SearchService.instance;
+  }
+  async search(query, options) {
+    const start = performance.now();
+    const limit = (options == null ? void 0 : options.limit) || 10;
+    const isHybrid = (options == null ? void 0 : options.hybrid) ?? true;
+    const chatId = options == null ? void 0 : options.chatId;
+    if (!query.trim()) return [];
+    console.log(`[SearchService] Querying: "${query}" (hybrid: ${isHybrid}, chatId: ${chatId || "none"})`);
+    let queryEmbedding;
+    try {
+      const embeddingService = EmbeddingService.getInstance();
+      queryEmbedding = await embeddingService.embed(query);
+    } catch (err) {
+      console.error("[SearchService] Error generating embedding:", err);
+      queryEmbedding = new Float32Array(384);
+    }
+    const searchStart = performance.now();
+    const vectorResults = isHybrid ? this.vectorRepo.hybridSearch(queryEmbedding, query, limit, 0.7, chatId) : this.vectorRepo.search(queryEmbedding, limit, chatId);
+    const chunkIds = vectorResults.map((v) => v.chunk_id);
+    const chunks = this.chunkRepo.findByIds(chunkIds);
+    const chunkMap = new Map(chunks.map((c) => [c.id, c]));
+    const chatMap = /* @__PURE__ */ new Map();
+    const finalResults = [];
+    for (const vRes of vectorResults) {
+      const chunk = chunkMap.get(vRes.chunk_id);
+      if (!chunk) continue;
+      let chatName = chatMap.get(chunk.chat_id);
+      if (!chatName) {
+        const chat = this.chatRepo.findById(chunk.chat_id);
+        chatName = chat ? chat.name : "Unknown Chat";
+        chatMap.set(chunk.chat_id, chatName);
+      }
+      const date = new Date(chunk.start_time * 1e3);
+      const formattedDate = new Intl.DateTimeFormat("pt-BR", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+      }).format(date).replace(",", "");
+      let similarityScore = 0;
+      if (isHybrid) {
+        const rrfScore = 1 - vRes.distance;
+        const maxRrfScore = 1 / 61;
+        similarityScore = Math.min(1, rrfScore / maxRrfScore);
+      } else {
+        const cosineDist = vRes.distance * vRes.distance / 2;
+        similarityScore = Math.max(0, 1 - cosineDist);
+      }
+      finalResults.push({
+        id: `res-${vRes.chunk_id}`,
+        chatId: chunk.chat_id,
+        chatName,
+        score: similarityScore,
+        content: chunk.display_content,
+        date: formattedDate,
+        sender: chunk.participants.length > 0 ? chunk.participants[0] : "Unknown",
+        chunkId: vRes.chunk_id
+      });
+    }
+    const end = performance.now();
+    console.log(`[SearchService] Search complete in ${Math.round(end - start)}ms (DB: ${Math.round(end - searchStart)}ms). Found ${finalResults.length} results.`);
+    return finalResults;
+  }
+};
+__publicField(_SearchService, "instance", null);
+let SearchService = _SearchService;
+function registerSearchHandlers() {
+  ipcMain.handle("search:query", async (_event, query, options) => {
+    try {
+      return await SearchService.getInstance().search(query, options);
+    } catch (err) {
+      console.error("[SearchHandlers] Error executing search:", err);
+      return [];
+    }
+  });
+}
 function registerAllHandlers(win2) {
   registerChatHandlers();
   registerImportHandlers(win2);
+  registerModelHandlers(win2);
+  registerSearchHandlers();
 }
 const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
 process.env.APP_ROOT = path.join(__dirname$1, "..");

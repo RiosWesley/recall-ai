@@ -30,23 +30,23 @@ export interface ModelEntry {
 
 export const MODEL_REGISTRY = {
   /**
-   * all-MiniLM-L6-v2 — Sentence embedding model, 384 dimensions.
+   * nomic-embed-text-v1.5 — Extremely capable Semantic Embedding Model, 768 dimensions.
    *
-   * F16 (half-precision float) is used for maximum embedding quality.
-   * For RAG use cases, embedding fidelity directly impacts search recall.
-   * Size: ~46MB — acceptable for a one-time first-run download.
+   * Replaces 'all-MiniLM' to provide an industry-leading context window (8192 tokens),
+   * ensuring massive monolithic text chunks never overflow the context.
+   * Superior multimodal and varied-context search recall.
+   * Size: ~80MB (Q4_K_M).
    *
-   * Repo: second-state/All-MiniLM-L6-v2-Embedding-GGUF
-   * This repo is purpose-built for embedding usage with proper pooling support.
+   * Repo: nomic-ai/nomic-embed-text-v1.5-GGUF
    */
   embedding: {
     key: 'embedding',
-    name: 'all-MiniLM-L6-v2',
-    uri: 'hf:second-state/All-MiniLM-L6-v2-Embedding-GGUF:F16',
-    sizeEstimate: 46_000_000, // ~46MB
+    name: 'nomic-embed-text-v1.5',
+    uri: 'hf:nomic-ai/nomic-embed-text-v1.5-GGUF:Q4_K_M',
+    sizeEstimate: 80_000_000, // ~80MB
     purpose: 'embedding',
-    dimensions: 384,
-    quantization: 'F16 (full half-precision)',
+    dimensions: 768,
+    quantization: 'Q4_K_M',
   },
 
   /**

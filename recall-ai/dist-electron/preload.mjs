@@ -32,6 +32,10 @@ electron.contextBridge.exposeInMainWorld("api", {
     electron.ipcRenderer.on("models:progress", listener);
     return () => electron.ipcRenderer.off("models:progress", listener);
   },
+  // ── Search ──────────────────────────────────────────────────────────────────
+  search(query, options) {
+    return electron.ipcRenderer.invoke("search:query", query, options);
+  },
   // ── Window controls ─────────────────────────────────────────────────────────
   windowMinimize() {
     electron.ipcRenderer.send("window:minimize");

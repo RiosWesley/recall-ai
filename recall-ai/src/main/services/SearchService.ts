@@ -85,12 +85,18 @@ export class SearchService {
       }).format(date).replace(',', '')
 
       // Heuristic for score to percentage
-      // For hybrid search, we output 1 - score as distance.
-      // So the similarity score is 1 - vRes.distance.
-      let similarityScore = Math.max(0, 1 - vRes.distance)
+      let similarityScore = 0
       if (isHybrid) {
-        // Boost hybrid score slightly for display purposes
-        similarityScore = Math.min(1.0, similarityScore * 50)
+        // Hybrid Search returns 1 - RRF_score
+        const rrfScore = 1 - vRes.distance
+        const maxRrfScore = 1.0 / 61.0 // Maximum possible match (Rank 1 semantic + Rank 1 keyword)
+        similarityScore = Math.min(1.0, rrfScore / maxRrfScore)
+      } else {
+        // Semantic Search uses sqlite-vec, which returns L2 distance.
+        // For normalized vectors, Cosine Distance = L2^2 / 2
+        // Cosine Similarity = 1 - Cosine Distance
+        const cosineDist = (vRes.distance * vRes.distance) / 2
+        similarityScore = Math.max(0, 1 - cosineDist)
       }
 
       finalResults.push({
