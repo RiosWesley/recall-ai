@@ -26,7 +26,7 @@ export class SearchService {
     return SearchService.instance
   }
 
-  async search(query: string, options?: SearchOptions): Promise<SearchResult[]> {
+  async search(query: string, options?: SearchOptions, precomputedEmbedding?: Float32Array): Promise<SearchResult[]> {
     const start = performance.now()
     const limit = options?.limit || 10
     const isHybrid = options?.hybrid ?? true
@@ -38,13 +38,17 @@ export class SearchService {
 
     // 1. Embed query
     let queryEmbedding: Float32Array
-    try {
-      const embeddingService = EmbeddingService.getInstance()
-      queryEmbedding = await embeddingService.embed(query)
-    } catch (err) {
-      console.error('[SearchService] Error generating embedding:', err)
-      // Fallback empty embed handling
-      queryEmbedding = new Float32Array(384)
+    if (precomputedEmbedding) {
+      queryEmbedding = precomputedEmbedding
+    } else {
+      try {
+        const embeddingService = EmbeddingService.getInstance()
+        queryEmbedding = await embeddingService.embed(query)
+      } catch (err) {
+        console.error('[SearchService] Error generating embedding:', err)
+        // Fallback empty embed handling
+        queryEmbedding = new Float32Array(384)
+      }
     }
     
     // 2. Vector Search

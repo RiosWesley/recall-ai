@@ -11,7 +11,10 @@ export default defineConfig({
     react(),
     electron({
       main: {
-        entry: 'electron/main.ts',
+        entry: {
+          main: 'electron/main.ts',
+          'llm-worker': 'src/main/services/llm-worker.ts'
+        },
         vite: {
           build: {
             rollupOptions: {

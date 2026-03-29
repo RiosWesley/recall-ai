@@ -8,10 +8,12 @@ import { registerChatHandlers } from './chatHandlers'
 import { registerImportHandlers } from './importHandlers'
 import { registerModelHandlers } from './modelHandlers'
 import { registerSearchHandlers } from './searchHandlers'
+import { registerRagHandlers } from './ragHandlers'
 
 export function registerAllHandlers(win: BrowserWindow) {
   registerChatHandlers()
   registerImportHandlers(win)
   registerModelHandlers(win)
   registerSearchHandlers()
+  registerRagHandlers(win)
 }

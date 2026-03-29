@@ -548,7 +548,7 @@ search(query: string, options?: SearchOptions): Promise<SearchResult[]>
 
 ---
 
-## [ ] TASK 3.1 — LLM Service (Utility Process)
+## [x] TASK 3.1 — LLM Service (Utility Process)
 
 **Objetivo:** Carregar Gemma 3 270M via node-llama-cpp em Electron Utility Process com streaming de tokens.
 
@@ -594,18 +594,18 @@ class LLMService {
 - Configurável: temperature, maxTokens, topP, stopSequences
 
 **Critérios de aceitação:**
-- [ ] Utility process spawnado corretamente
-- [ ] Gemma 3 270M carrega sem crash
-- [ ] `generate("Olá, quem é você?")` retorna resposta coerente
-- [ ] `generateStream` emite tokens um a um
-- [ ] GPU utilizada automaticamente se disponível
-- [ ] `dispose()` mata o process e libera memória
-- [ ] Não bloqueia main process durante inferência
-- [ ] Funciona em CPU-only
+- [x] Utility process spawnado corretamente
+- [x] Gemma 3 270M carrega sem crash
+- [x] `generate("Olá, quem é você?")` retorna resposta coerente
+- [x] `generateStream` emite tokens um a um
+- [x] GPU utilizada automaticamente se disponível
+- [x] `dispose()` mata o process e libera memória
+- [x] Não bloqueia main process durante inferência
+- [x] Funciona em CPU-only
 
 ---
 
-## [ ] TASK 3.2 — RAG Service + Pipeline
+## [x] TASK 3.2 — RAG Service + Pipeline
 
 **Objetivo:** Criar o orquestrador RAG que combina busca semântica + LLM para gerar respostas contextualizadas.
 
@@ -652,13 +652,13 @@ interface RAGResponse {
 ```
 
 **Critérios de aceitação:**
-- [ ] Pipeline completa: pergunta → busca → contexto → LLM → resposta
-- [ ] Chunks usados como fonte retornados (citations)
-- [ ] Latency metrics medidas e retornadas
-- [ ] Fallback: se LLM falhar, retornar chunks como resposta
-- [ ] Se contexto não encontrado, resposta indica isso
-- [ ] Prompt otimizado para Gemma 270M (conciso, direto)
-- [ ] IPC handlers `rag:query`, `rag:token`, `rag:done` registrados
+- [x] Pipeline completa: pergunta → busca → contexto → LLM → resposta
+- [x] Chunks usados como fonte retornados (citations)
+- [x] Latency metrics medidas e retornadas
+- [x] Fallback: se LLM falhar, retornar chunks como resposta
+- [x] Se contexto não encontrado, resposta indica isso
+- [x] Prompt otimizado para Gemma 270M (conciso, direto)
+- [x] IPC handlers `rag:query`, `rag:token`, `rag:done` registrados
 
 ---
 

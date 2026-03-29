@@ -197,3 +197,24 @@ export interface ModelDownloadProgress {
   speed: number
 }
 
+// ─── RAG ───────────────────────────────────────────────────────────────────
+
+export interface RAGLatency {
+  embedding: number
+  search: number
+  generation: number
+  total: number
+}
+
+export interface RAGOptions {
+  chatId?: string
+  temperature?: number
+  maxTokens?: number
+}
+
+export interface RAGResponse {
+  answer: string
+  context: SearchResult[]
+  tokensUsed: number
+  latency: RAGLatency
+}

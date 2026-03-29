@@ -1,7 +1,7 @@
 var __defProp = Object.defineProperty;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
-import { app, ipcMain, dialog, BrowserWindow } from "electron";
+import { app, ipcMain, dialog, utilityProcess, BrowserWindow } from "electron";
 import { fileURLToPath } from "node:url";
 import path, { basename } from "node:path";
 import Database from "better-sqlite3";
@@ -157,8 +157,6 @@ function isSqliteVecLoaded(db) {
     return false;
   }
 }
-const __filename$1 = fileURLToPath(import.meta.url);
-path.dirname(__filename$1);
 const _DatabaseService = class _DatabaseService {
   static getInstance() {
     if (_DatabaseService.db) {
@@ -1547,7 +1545,7 @@ const _SearchService = class _SearchService {
     }
     return _SearchService.instance;
   }
-  async search(query, options) {
+  async search(query, options, precomputedEmbedding) {
     const start = performance.now();
     const limit = (options == null ? void 0 : options.limit) || 10;
     const isHybrid = (options == null ? void 0 : options.hybrid) ?? true;
@@ -1555,12 +1553,16 @@ const _SearchService = class _SearchService {
     if (!query.trim()) return [];
     console.log(`[SearchService] Querying: "${query}" (hybrid: ${isHybrid}, chatId: ${chatId || "none"})`);
     let queryEmbedding;
-    try {
-      const embeddingService = EmbeddingService.getInstance();
-      queryEmbedding = await embeddingService.embed(query);
-    } catch (err) {
-      console.error("[SearchService] Error generating embedding:", err);
-      queryEmbedding = new Float32Array(384);
+    if (precomputedEmbedding) {
+      queryEmbedding = precomputedEmbedding;
+    } else {
+      try {
+        const embeddingService = EmbeddingService.getInstance();
+        queryEmbedding = await embeddingService.embed(query);
+      } catch (err) {
+        console.error("[SearchService] Error generating embedding:", err);
+        queryEmbedding = new Float32Array(384);
+      }
     }
     const searchStart = performance.now();
     const vectorResults = isHybrid ? this.vectorRepo.hybridSearch(queryEmbedding, query, limit, 0.7, chatId) : this.vectorRepo.search(queryEmbedding, limit, chatId);
@@ -1623,11 +1625,264 @@ function registerSearchHandlers() {
     }
   });
 }
+const _LLMService = class _LLMService {
+  constructor() {
+    __publicField(this, "worker", null);
+    __publicField(this, "pendingRequests", /* @__PURE__ */ new Map());
+    __publicField(this, "initializationPromise", null);
+    __publicField(this, "ready", false);
+  }
+  static getInstance() {
+    if (!_LLMService.instance) {
+      _LLMService.instance = new _LLMService();
+    }
+    return _LLMService.instance;
+  }
+  async initialize() {
+    if (this.ready) return;
+    if (this.initializationPromise) return this.initializationPromise;
+    this.initializationPromise = new Promise(async (resolve, reject) => {
+      try {
+        console.log("[LLMService] Resolving LLM model path...");
+        const modelPath = await ModelManager.getInstance().resolve("llm");
+        console.log("[LLMService] Forking Utility Process...");
+        const workerPath = path.join(__dirname, "llm-worker.js");
+        this.worker = utilityProcess.fork(workerPath, [], {
+          stdio: "inherit"
+          // Permite ler a stdout/stderr do child process no terminal
+        });
+        this.worker.on("message", (msg) => this.handleWorkerMessage(msg));
+        this.worker.on("exit", (code) => {
+          console.warn(`[LLMService] Utility process exited with code ${code}`);
+          this.ready = false;
+          this.worker = null;
+          this.rejectAllPending(new Error(`LLM Worker exited unexpectedly with code ${code}`));
+        });
+        const id = nanoid();
+        this.pendingRequests.set(id, {
+          resolve: () => {
+            console.log("[LLMService] Utility Process initialized successfully.");
+            this.ready = true;
+            resolve();
+          },
+          reject
+        });
+        this.worker.postMessage({
+          type: "init",
+          id,
+          payload: { modelPath }
+        });
+      } catch (err) {
+        console.error("[LLMService] Failed to initialize:", err);
+        this.initializationPromise = null;
+        reject(err);
+      }
+    });
+    try {
+      await this.initializationPromise;
+    } finally {
+      this.initializationPromise = null;
+    }
+  }
+  isReady() {
+    return this.ready;
+  }
+  async generate(prompt, options) {
+    return this.generateStream(prompt, () => {
+    }, options);
+  }
+  async generateStream(prompt, onToken, options) {
+    if (!this.ready || !this.worker) {
+      await this.initialize();
+    }
+    return new Promise((resolve, reject) => {
+      const id = nanoid();
+      this.pendingRequests.set(id, { resolve, reject, onToken });
+      this.worker.postMessage({
+        type: "generate",
+        id,
+        payload: { prompt, options }
+      });
+    });
+  }
+  getModelInfo() {
+    return {
+      modelName: MODEL_REGISTRY.llm.name,
+      parameters: "270M"
+    };
+  }
+  async dispose() {
+    if (!this.worker) return;
+    console.log("[LLMService] Disposing worker...");
+    this.worker.postMessage({ type: "dispose" });
+    await new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        if (this.worker) this.worker.kill();
+        resolve();
+      }, 2e3);
+      this.worker.once("exit", () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
+    this.worker = null;
+    this.ready = false;
+    this.rejectAllPending(new Error("LLMService is disposing or shutting down"));
+    this.initializationPromise = null;
+  }
+  handleWorkerMessage(msg) {
+    const { type, id, error, token, text } = msg;
+    if (!id || !this.pendingRequests.has(id)) {
+      if (type === "error") {
+        console.error(`[LLMWorker Global Error]`, error);
+      }
+      return;
+    }
+    const { resolve, reject, onToken } = this.pendingRequests.get(id);
+    switch (type) {
+      case "init-ready":
+        this.pendingRequests.delete(id);
+        resolve();
+        break;
+      case "token":
+        if (onToken && token) onToken(token);
+        break;
+      case "done":
+        this.pendingRequests.delete(id);
+        resolve(text);
+        break;
+      case "error":
+        this.pendingRequests.delete(id);
+        reject(new Error(error));
+        break;
+      default:
+        console.warn(`[LLMWorker] Unrecognized message type '${type}'`);
+    }
+  }
+  rejectAllPending(error) {
+    for (const [id, req] of this.pendingRequests.entries()) {
+      req.reject(error);
+      this.pendingRequests.delete(id);
+    }
+  }
+};
+__publicField(_LLMService, "instance", null);
+let LLMService = _LLMService;
+const promptTemplates = {
+  buildRAGPrompt: (question, chunks) => {
+    const formattedChunks = chunks.map((c) => `[${c.date} - ${c.sender}]: ${c.content}`).join("\n\n");
+    return `<|system|>
+Você é um assistente que responde perguntas sobre conversas de chat.
+Baseie suas respostas APENAS no contexto fornecido.
+Se a informação não estiver no contexto, diga "Não encontrei essa informação."
+Seja conciso e direto.
+<|end|>
+<|context|>
+${formattedChunks}
+<|end|>
+
+Pergunta: ${question}`;
+  }
+};
+const _RAGService = class _RAGService {
+  constructor() {
+  }
+  static getInstance() {
+    if (!_RAGService.instance) {
+      _RAGService.instance = new _RAGService();
+    }
+    return _RAGService.instance;
+  }
+  async generateStream(question, onToken, options) {
+    const totalStart = performance.now();
+    const latency = { embedding: 0, search: 0, generation: 0, total: 0 };
+    let context = [];
+    try {
+      const embeddingStart = performance.now();
+      const embeddingService = EmbeddingService.getInstance();
+      let queryEmbedding;
+      try {
+        queryEmbedding = await embeddingService.embed(question);
+        latency.embedding = performance.now() - embeddingStart;
+      } catch (err) {
+        console.error("[RAGService] Error generating embedding:", err);
+        queryEmbedding = new Float32Array(384);
+      }
+      const searchStart = performance.now();
+      const searchService = SearchService.getInstance();
+      context = await searchService.search(question, { hybrid: true, limit: 5, chatId: options == null ? void 0 : options.chatId }, queryEmbedding);
+      latency.search = performance.now() - searchStart;
+      if (context.length === 0) {
+        latency.total = performance.now() - totalStart;
+        return {
+          answer: "Não encontrei trechos de conversa relevantes para a sua pergunta.",
+          context,
+          tokensUsed: 0,
+          latency
+        };
+      }
+      const prompt = promptTemplates.buildRAGPrompt(question, context);
+      const generationStart = performance.now();
+      const llmService = LLMService.getInstance();
+      let answer = "";
+      let tokensUsed = 0;
+      try {
+        answer = await llmService.generateStream(
+          prompt,
+          (token) => {
+            tokensUsed++;
+            if (onToken) onToken(token);
+          },
+          {
+            temperature: options == null ? void 0 : options.temperature,
+            maxTokens: (options == null ? void 0 : options.maxTokens) || 1024
+          }
+        );
+      } catch (llmError) {
+        console.error("[RAGService] Error generating response from LLM:", llmError);
+        answer = "Desculpe, ocorreu um erro ao gerar a resposta ou o LLM falhou.\n\nContexto encontrado:" + context.map((c, i) => `
+[${i + 1}] ${c.date} ${c.sender}: ${c.content}`).join("");
+      }
+      latency.generation = performance.now() - generationStart;
+      latency.total = performance.now() - totalStart;
+      return {
+        answer,
+        context,
+        tokensUsed,
+        latency
+      };
+    } catch (err) {
+      console.error("[RAGService] Fatal error in RAG pipeline:", err);
+      throw err;
+    }
+  }
+};
+__publicField(_RAGService, "instance", null);
+let RAGService = _RAGService;
+function registerRagHandlers(win2) {
+  ipcMain.handle("rag:query", async (_event, question, options) => {
+    try {
+      const ragService = RAGService.getInstance();
+      const response = await ragService.generateStream(
+        question,
+        (token) => {
+          win2.webContents.send("rag:token", token);
+        },
+        options
+      );
+      win2.webContents.send("rag:done", response);
+    } catch (error) {
+      console.error("[IPC rag:query] Error:", error);
+      throw error;
+    }
+  });
+}
 function registerAllHandlers(win2) {
   registerChatHandlers();
   registerImportHandlers(win2);
   registerModelHandlers(win2);
   registerSearchHandlers();
+  registerRagHandlers(win2);
 }
 const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
 process.env.APP_ROOT = path.join(__dirname$1, "..");
