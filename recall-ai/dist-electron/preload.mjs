@@ -20,6 +20,18 @@ electron.contextBridge.exposeInMainWorld("api", {
   deleteChat(chatId) {
     return electron.ipcRenderer.invoke("chats:delete", chatId);
   },
+  // ── Models ──────────────────────────────────────────────────────────────────
+  checkModels() {
+    return electron.ipcRenderer.invoke("models:check");
+  },
+  downloadModel(key) {
+    return electron.ipcRenderer.invoke("models:download", key);
+  },
+  onModelProgress(cb) {
+    const listener = (_event, progress) => cb(progress);
+    electron.ipcRenderer.on("models:progress", listener);
+    return () => electron.ipcRenderer.off("models:progress", listener);
+  },
   // ── Window controls ─────────────────────────────────────────────────────────
   windowMinimize() {
     electron.ipcRenderer.send("window:minimize");

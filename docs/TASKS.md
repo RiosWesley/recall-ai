@@ -319,7 +319,7 @@ interface ElectronAPI {
 
 ---
 
-## [ ] TASK 2.1 — Model Downloader (First-Run)
+## [x] TASK 2.1 — Model Downloader (First-Run)
 
 **Objetivo:** Criar sistema de download automático dos modelos GGUF no primeiro uso, com progress, retry e verificação de integridade.
 
