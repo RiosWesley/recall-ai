@@ -142,3 +142,38 @@ export interface ImportResult {
   duplicate?: boolean
 }
 
+// ─── MODELS ──────────────────────────────────────────────────────────────────
+
+export type ModelKey = 'embedding' | 'llm'
+export type ModelPurpose = 'embedding' | 'generation'
+
+/**
+ * Snapshot of a model's local availability — returned by models:check.
+ */
+export interface ModelStatus {
+  key: ModelKey
+  name: string
+  quantization: string
+  /** Approximate file size in bytes for UI display */
+  sizeEstimate: number
+  purpose: ModelPurpose
+  /** True if the model file is present locally */
+  available: boolean
+  /** Absolute path to the model file (only set when available === true) */
+  filePath?: string
+}
+
+/**
+ * Real-time download progress — emitted on models:progress IPC event.
+ */
+export interface ModelDownloadProgress {
+  key: ModelKey
+  name: string
+  downloadedBytes: number
+  totalBytes: number
+  /** 0–100 */
+  percent: number
+  /** Bytes per second */
+  speed: number
+}
+

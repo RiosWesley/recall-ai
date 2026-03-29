@@ -3,7 +3,7 @@
  * The renderer accesses these via `window.api`.
  */
 
-import type { Chat, ImportResult, ImportProgress } from './types'
+import type { Chat, ImportResult, ImportProgress, ModelStatus, ModelDownloadProgress, ModelKey } from './types'
 
 export interface ElectronAPI {
   // ── Import ──────────────────────────────────────────────────────────────────
@@ -25,6 +25,23 @@ export interface ElectronAPI {
 
   /** Deletes a chat and all its messages, chunks, and vectors. */
   deleteChat(chatId: string): Promise<void>
+
+  // ── Models ──────────────────────────────────────────────────────────────────
+  /** Returns the availability status of all registered AI models. */
+  checkModels(): Promise<ModelStatus[]>
+
+  /**
+   * Downloads a model by key.
+   * Listen to onModelProgress for real-time progress updates.
+   * Resolves with the absolute path to the downloaded model file.
+   */
+  downloadModel(key: ModelKey): Promise<string>
+
+  /**
+   * Subscribe to model download progress events.
+   * Returns an unsubscribe function to clean up the listener.
+   */
+  onModelProgress(cb: (progress: ModelDownloadProgress) => void): () => void
 
   // ── Window controls ─────────────────────────────────────────────────────────
   windowMinimize(): void

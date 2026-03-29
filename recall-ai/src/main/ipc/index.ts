@@ -6,8 +6,10 @@
 import type { BrowserWindow } from 'electron'
 import { registerChatHandlers } from './chatHandlers'
 import { registerImportHandlers } from './importHandlers'
+import { registerModelHandlers } from './modelHandlers'
 
 export function registerAllHandlers(win: BrowserWindow) {
   registerChatHandlers()
   registerImportHandlers(win)
+  registerModelHandlers(win)
 }

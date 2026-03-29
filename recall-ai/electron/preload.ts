@@ -1,5 +1,5 @@
 import { ipcRenderer, contextBridge } from 'electron'
-import type { ImportProgress, ImportResult, Chat } from '../src/shared/types'
+import type { ImportProgress, ImportResult, Chat, ModelStatus, ModelDownloadProgress, ModelKey } from '../src/shared/types'
 
 /**
  * Expose a typed, minimal API to the renderer process via contextBridge.
@@ -33,6 +33,21 @@ contextBridge.exposeInMainWorld('api', {
 
   deleteChat(chatId: string): Promise<void> {
     return ipcRenderer.invoke('chats:delete', chatId)
+  },
+
+  // ── Models ──────────────────────────────────────────────────────────────────
+  checkModels(): Promise<ModelStatus[]> {
+    return ipcRenderer.invoke('models:check')
+  },
+
+  downloadModel(key: ModelKey): Promise<string> {
+    return ipcRenderer.invoke('models:download', key)
+  },
+
+  onModelProgress(cb: (progress: ModelDownloadProgress) => void): () => void {
+    const listener = (_event: Electron.IpcRendererEvent, progress: ModelDownloadProgress) => cb(progress)
+    ipcRenderer.on('models:progress', listener)
+    return () => ipcRenderer.off('models:progress', listener)
   },
 
   // ── Window controls ─────────────────────────────────────────────────────────
