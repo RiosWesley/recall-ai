@@ -408,7 +408,7 @@ class EmbeddingService {
 
 ---
 
-## [ ] TASK 2.3 — VectorRepository (sqlite-vec KNN)
+## [x] TASK 2.3 — VectorRepository (sqlite-vec KNN)
 
 **Objetivo:** Implementar o VectorRepository real com busca KNN usando sqlite-vec.
 
@@ -447,12 +447,12 @@ LIMIT ?
 - Parâmetro α configurável (default 0.7)
 
 **Critérios de aceitação:**
-- [ ] Insert de embedding funciona
-- [ ] KNN search retorna chunks ordenados por distância
-- [ ] Busca com 10k vetores retorna em < 30ms
-- [ ] Busca híbrida combina scores corretamente
-- [ ] Delete por chatId limpa vetores associados
-- [ ] Tipos corretos no retorno (chunk_id + distance)
+- [x] Insert de embedding funciona
+- [x] KNN search retorna chunks ordenados por distância
+- [x] Busca com 10k vetores retorna em < 30ms
+- [x] Busca híbrida combina scores corretamente
+- [x] Delete por chatId limpa vetores associados
+- [x] Tipos corretos no retorno (chunk_id + distance)
 
 ---
 

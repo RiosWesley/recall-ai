@@ -2,12 +2,8 @@ import Database from 'better-sqlite3'
 import type { VectorResult } from '../../../shared/types'
 
 /**
- * VectorRepository — placeholder for sqlite-vec KNN search.
- *
- * The real implementation (Task 2.3) will perform KNN queries against
- * the `vectors` virtual table once the EmbeddingService is available.
- *
- * This placeholder provides the correct interface so dependent code compiles.
+ * VectorRepository handles KNN search and storage for text embeddings
+ * using the sqlite-vec extension.
  */
 export class VectorRepository {
   private readonly isAvailable: boolean
@@ -36,6 +32,28 @@ export class VectorRepository {
   }
 
   /**
+   * Store multiple chunks' embeddings in a single transaction.
+   * @param items - Array of { chunkId, embedding }
+   */
+  insertBatch(items: { chunkId: string; embedding: Float32Array }[]): void {
+    if (!this.isAvailable) {
+      console.warn('[VectorRepository] sqlite-vec not available — skipping batch insert')
+      return
+    }
+
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO vectors (chunk_id, embedding)
+      VALUES (?, ?)
+    `)
+
+    this.db.transaction((vectors: { chunkId: string; embedding: Float32Array }[]) => {
+      for (const item of vectors) {
+        stmt.run(item.chunkId, Buffer.from(item.embedding.buffer))
+      }
+    })(items)
+  }
+
+  /**
    * Perform a KNN search for the closest chunks to a query embedding.
    * @param queryEmbedding - Float32Array of length 384
    * @param topK - Number of results to return
@@ -60,7 +78,8 @@ export class VectorRepository {
   }
 
   /**
-   * Hybrid search: combines semantic similarity (KNN) with FTS5 keyword scoring.
+   * Hybrid search: combines semantic similarity (KNN) with FTS5 keyword scoring
+   * utilizing the Reciprocal Rank Fusion (RRF) algorithm for robust score normalization.
    * @param queryEmbedding - Float32Array of length 384
    * @param queryText - Original query string for FTS5
    * @param topK - Number of results
@@ -79,17 +98,20 @@ export class VectorRepository {
 
     const buffer = Buffer.from(queryEmbedding.buffer)
     const beta = 1 - alpha
+    // We fetch a bit more than topK internally to improve RRF overlap quality
+    const fetchCount = topK * 5
 
     const rows = this.db.prepare(`
       WITH semantic AS (
-        SELECT chunk_id, distance as sem_dist
+        SELECT chunk_id, distance as sem_dist,
+               row_number() OVER (ORDER BY distance ASC) as sem_rank
         FROM vectors
         WHERE embedding MATCH ?
-        ORDER BY distance ASC
         LIMIT ?
       ),
       keyword AS (
-        SELECT chunk_id, rank as kw_rank
+        SELECT chunk_id, rank as kw_score,
+               row_number() OVER (ORDER BY rank ASC) as kw_rank
         FROM chunks_fts
         WHERE content MATCH ?
         LIMIT ?
@@ -97,8 +119,8 @@ export class VectorRepository {
       combined AS (
         SELECT
           COALESCE(s.chunk_id, k.chunk_id) AS chunk_id,
-          (? * COALESCE(1.0 / (1.0 + s.sem_dist), 0))
-          + (? * COALESCE(1.0 / (1.0 + ABS(k.kw_rank)), 0)) AS score
+          (? * COALESCE(1.0 / (60.0 + s.sem_rank), 0.0))
+          + (? * COALESCE(1.0 / (60.0 + k.kw_rank), 0.0)) AS score
         FROM semantic s
         FULL OUTER JOIN keyword k ON s.chunk_id = k.chunk_id
       )
@@ -106,7 +128,7 @@ export class VectorRepository {
       FROM combined
       ORDER BY score DESC
       LIMIT ?
-    `).all(buffer, topK * 2, queryText, topK * 2, alpha, beta, topK) as VectorResult[]
+    `).all(buffer, fetchCount, queryText, fetchCount, alpha, beta, topK) as VectorResult[]
 
     return rows
   }
