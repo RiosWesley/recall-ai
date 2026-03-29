@@ -341,6 +341,10 @@ code, pre, .mono {
   color: var(--text-muted);
 }
 
+.chat-item:hover .chat-delete-btn {
+  opacity: 1 !important;
+}
+
 /* ─── Main Content Area ─── */
 .page {
   height: 100%;

@@ -1,4 +1,4 @@
-import { BrainCircuit, Minus, Square, X } from 'lucide-react'
+import { BrainCircuit } from 'lucide-react'
 import type { Page } from '../../App'
 
 const PAGE_LABELS: Record<Page, string> = {
@@ -7,6 +7,7 @@ const PAGE_LABELS: Record<Page, string> = {
   search: 'Busca Semântica',
   chat: 'Conversa com IA',
   settings: 'Configurações',
+  people: 'Grafo de Pessoas',
 }
 
 interface TitleBarProps {
@@ -14,9 +15,9 @@ interface TitleBarProps {
 }
 
 export default function TitleBar({ currentPage }: TitleBarProps) {
-  const handleMinimize = () => (window as any).ipcRenderer?.send('window:minimize')
-  const handleMaximize = () => (window as any).ipcRenderer?.send('window:maximize')
-  const handleClose = () => (window as any).ipcRenderer?.send('window:close')
+  const handleMinimize = () => window.api?.windowMinimize()
+  const handleMaximize = () => window.api?.windowMaximize()
+  const handleClose = () => window.api?.windowClose()
 
   return (
     <header className="titlebar">

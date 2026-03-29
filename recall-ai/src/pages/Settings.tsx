@@ -176,7 +176,7 @@ export default function SettingsPage() {
   const [temp, setTemp] = useState(0.3)
   const [history, setHistory] = useState(true)
   const [analytics, setAnalytics] = useState(false)
-  const [theme, setTheme] = useState('dark')
+
 
   return (
     <div className="page">

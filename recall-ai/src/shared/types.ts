@@ -109,3 +109,36 @@ export interface SearchHistory {
   result_count: number
   created_at: number
 }
+
+// ─── IMPORT ──────────────────────────────────────────────────────────────────
+
+export type ImportStageId =
+  | 'reading'
+  | 'parsing'
+  | 'chunking'
+  | 'storing'
+  | 'done'
+  | 'error'
+
+export interface ImportProgress {
+  stage: ImportStageId
+  /** 0–100 */
+  percent: number
+  /** Human-readable status label */
+  label: string
+  /** Detailed description shown under the step */
+  detail?: string
+}
+
+export interface ImportResult {
+  success: boolean
+  chatId?: string
+  chatName?: string
+  messageCount?: number
+  chunkCount?: number
+  /** Set when success === false */
+  error?: string
+  /** Set when the file was already imported (same hash) */
+  duplicate?: boolean
+}
+

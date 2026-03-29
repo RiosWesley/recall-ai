@@ -1,35 +1,79 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   LayoutDashboard, Search, MessageSquare,
-  Settings, Network, ChevronRight, Clock,
-  MessageCircle, Plus
+  Settings, Network, Clock,
+  MessageCircle, Plus, Trash2
 } from 'lucide-react'
 import type { Page } from '../../App'
+import type { Chat } from '../../shared/types'
 
 interface SidebarProps {
   currentPage: Page
   navigate: (page: Page, chatId?: string) => void
 }
 
-// Mock sources — will be replaced with real data from IPC
-const MOCK_SOURCES = [
-  { id: '1', name: 'Maria — Família', messageCount: 4821, lastActive: '2h atrás', color: '#00d97e' },
-  { id: '2', name: 'Trabalho — Squad', messageCount: 12340, lastActive: '1d atrás', color: '#38bdf8' },
-  { id: '3', name: 'João Silva', messageCount: 892, lastActive: '3d atrás', color: '#f0a500' },
-]
-
-const MOCK_HISTORY = [
-  { id: 'h1', query: 'receita de bolo de cenoura' },
-  { id: 'h2', query: 'reunião de segunda-feira' },
-  { id: 'h3', query: 'endereço da festa' },
-]
-
 export default function Sidebar({ currentPage, navigate }: SidebarProps) {
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
+  const [chats, setChats] = useState<Chat[]>([])
+
+  const refreshChats = useCallback(async () => {
+    try {
+      const data = await window.api.getChats()
+      setChats(data)
+    } catch (err) {
+      console.error('[Sidebar] Failed to load chats:', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    refreshChats()
+
+    // Re-fetch chats after import completes
+    const unsub = window.api.onImportProgress((progress) => {
+      if (progress.stage === 'done') {
+        refreshChats()
+      }
+    })
+
+    return () => unsub()
+  }, [refreshChats])
 
   const handleChatClick = (chatId: string) => {
     setActiveChatId(chatId)
     navigate('chat', chatId)
+  }
+
+  const handleDeleteChat = async (e: React.MouseEvent, chatId: string) => {
+    e.stopPropagation()
+    try {
+      await window.api.deleteChat(chatId)
+      setChats((prev) => prev.filter((c) => c.id !== chatId))
+      if (activeChatId === chatId) setActiveChatId(null)
+    } catch (err) {
+      console.error('[Sidebar] Failed to delete chat:', err)
+    }
+  }
+
+  /** Format a Unix timestamp as a relative label (pt-BR style). */
+  function formatRelative(ts: number | null): string {
+    if (!ts) return '—'
+    const diffMs = Date.now() - ts * 1000
+    const diffMin = Math.floor(diffMs / 60_000)
+    if (diffMin < 1) return 'agora'
+    if (diffMin < 60) return `${diffMin}min atrás`
+    const diffHr = Math.floor(diffMin / 60)
+    if (diffHr < 24) return `${diffHr}h atrás`
+    const diffDay = Math.floor(diffHr / 24)
+    if (diffDay < 7) return `${diffDay}d atrás`
+    return new Date(ts * 1000).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })
+  }
+
+  // Assign a deterministic color from name hash
+  const CHAT_COLORS = ['#00d97e', '#38bdf8', '#f0a500', '#a78bfa', '#f43f5e', '#fb923c']
+  function colorFor(id: string): string {
+    let h = 0
+    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0
+    return CHAT_COLORS[h % CHAT_COLORS.length]
   }
 
   return (
@@ -93,7 +137,7 @@ export default function Sidebar({ currentPage, navigate }: SidebarProps) {
           </button>
         </div>
 
-        {MOCK_SOURCES.length === 0 ? (
+        {chats.length === 0 ? (
           <div style={{
             padding: '16px 8px',
             fontSize: '11px',
@@ -112,23 +156,39 @@ export default function Sidebar({ currentPage, navigate }: SidebarProps) {
           </div>
         ) : (
           <div className="sidebar__nav" style={{ marginTop: '4px' }}>
-            {MOCK_SOURCES.map(source => (
+            {chats.map(chat => (
               <div
-                key={source.id}
-                className={`chat-item ${activeChatId === source.id ? 'active' : ''}`}
-                onClick={() => handleChatClick(source.id)}
+                key={chat.id}
+                className={`chat-item ${activeChatId === chat.id ? 'active' : ''}`}
+                onClick={() => handleChatClick(chat.id)}
+                style={{ position: 'relative' }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-                  {/* Color dot instead of generic icon */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '7px', flex: 1, minWidth: 0 }}>
                   <div style={{
                     width: '5px', height: '5px', borderRadius: '50%',
-                    background: source.color, flexShrink: 0, opacity: 0.8,
+                    background: colorFor(chat.id), flexShrink: 0, opacity: 0.8,
                   }} />
-                  <span className="chat-item__name">{source.name}</span>
+                  <span className="chat-item__name">{chat.name}</span>
                 </div>
-                <div className="chat-item__meta">
-                  <MessageCircle size={9} style={{ display: 'inline', marginRight: '3px' }} />
-                  {source.messageCount.toLocaleString('pt-BR')} · {source.lastActive}
+                <div className="chat-item__meta" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <MessageCircle size={9} style={{ display: 'inline' }} />
+                  <span>{chat.message_count.toLocaleString('pt-BR')}</span>
+                  <span>·</span>
+                  <span>{formatRelative(chat.last_message_at)}</span>
+                  {/* Delete button — visible on hover */}
+                  <button
+                    title="Excluir chat"
+                    onClick={(e) => handleDeleteChat(e, chat.id)}
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      color: 'var(--text-muted)', padding: '0', marginLeft: '2px',
+                      opacity: 0, transition: 'opacity 0.15s',
+                      display: 'flex', alignItems: 'center',
+                    }}
+                    className="chat-delete-btn"
+                  >
+                    <Trash2 size={9} />
+                  </button>
                 </div>
               </div>
             ))}
@@ -137,37 +197,16 @@ export default function Sidebar({ currentPage, navigate }: SidebarProps) {
 
         <div className="sidebar__divider" style={{ margin: '12px 0 8px' }} />
 
-        {/* Search History */}
+        {/* Search History — static empty state for now (populated in TASK 2.5) */}
         <div className="sidebar__label">
           <Clock size={9} style={{ display: 'inline', marginRight: '4px' }} />
           Buscas Recentes
         </div>
 
         <div className="sidebar__nav" style={{ marginTop: '4px' }}>
-          {MOCK_HISTORY.length === 0 ? (
-            <div style={{ padding: '8px', fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center' }}>
-              Nenhuma busca ainda
-            </div>
-          ) : MOCK_HISTORY.map(item => (
-            <div
-              key={item.id}
-              className="nav-item"
-              style={{ fontSize: '11px', padding: '5px 8px' }}
-              onClick={() => navigate('search')}
-            >
-              <Search size={11} style={{ opacity: 0.4, flexShrink: 0 }} />
-              <span style={{
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                flex: 1,
-                color: 'var(--text-muted)',
-              }}>
-                {item.query}
-              </span>
-              <ChevronRight size={10} style={{ opacity: 0.3, flexShrink: 0 }} />
-            </div>
-          ))}
+          <div style={{ padding: '8px', fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center' }}>
+            Nenhuma busca ainda
+          </div>
         </div>
       </div>
 
@@ -180,7 +219,7 @@ export default function Sidebar({ currentPage, navigate }: SidebarProps) {
           onClick={() => navigate('settings')}
         />
 
-        {/* Offline Status — simplified */}
+        {/* Offline Status */}
         <div style={{
           marginTop: '8px',
           padding: '8px 10px',
@@ -203,7 +242,7 @@ export default function Sidebar({ currentPage, navigate }: SidebarProps) {
               fontFamily: 'var(--font-mono)', fontSize: '9px',
               color: 'var(--text-muted)', marginTop: '1px',
             }}>
-              100% local · pronto
+              {chats.length} fonte{chats.length !== 1 ? 's' : ''} · 100% local
             </div>
           </div>
           <MessageSquare size={11} style={{ color: 'var(--text-muted)', opacity: 0.5 }} />

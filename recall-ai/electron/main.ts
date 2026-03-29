@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { DatabaseService } from '../src/main/db/database'
+import { registerAllHandlers } from '../src/main/ipc/index'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -39,13 +40,16 @@ function createWindow() {
     win?.show()
   })
 
-  // Window control IPC
+  // Window control IPC (one-way, no reply needed)
   ipcMain.on('window:minimize', () => win?.minimize())
   ipcMain.on('window:maximize', () => {
     if (win?.isMaximized()) win.unmaximize()
     else win?.maximize()
   })
   ipcMain.on('window:close', () => win?.close())
+
+  // Register all two-way IPC handlers (import, chats, etc.)
+  registerAllHandlers(win)
 
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)

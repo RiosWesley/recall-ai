@@ -69,4 +69,8 @@ export class MessageRepository {
 
     return rows.map(r => r.sender)
   }
+
+  deleteByChatId(chatId: string): void {
+    this.db.prepare('DELETE FROM messages WHERE chat_id = ?').run(chatId)
+  }
 }

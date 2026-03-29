@@ -234,7 +234,7 @@ src/main/core/chunking/
 
 ---
 
-## [ ] TASK 1.4 — IPC Bridge + Conectar Import UI
+## [x] TASK 1.4 — IPC Bridge + Conectar Import UI
 
 **Objetivo:** Refatorar o preload para contextBridge tipado, criar IPC handlers para importação e chats, e conectar a tela de Import à lógica real.
 
