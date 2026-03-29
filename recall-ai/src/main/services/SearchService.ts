@@ -53,8 +53,14 @@ export class SearchService {
     
     // 2. Vector Search
     const searchStart = performance.now()
-    const vectorResults = isHybrid
-      ? this.vectorRepo.hybridSearch(queryEmbedding, query, limit, 0.7, chatId)
+    
+    // FTS5 syntax restricts certain characters (like ?, *, ", -, etc.) without escaping.
+    // To prevent SQLite FTS5 parsing errors, we aggressively sanitize the query 
+    // to strictly preserve letters, numbers, and spaces.
+    const ftsQuery = query.replace(/[^\p{L}\p{N}\s_]/gu, ' ').replace(/\s+/g, ' ').trim()
+
+    const vectorResults = (isHybrid && ftsQuery.length > 0)
+      ? this.vectorRepo.hybridSearch(queryEmbedding, ftsQuery, limit, 0.7, chatId)
       : this.vectorRepo.search(queryEmbedding, limit, chatId)
 
     // 3. Enrich with Chunks and Chats

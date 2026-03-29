@@ -76,34 +76,45 @@ async function handleGenerate(id: string, payload: { prompt: string, options?: a
   const { prompt, options = {} } = payload;
   const start = performance.now();
 
-  // Uma nova sessão isola os contextos da query
+  const sequence = context.getSequence();
+
+  // Uma nova sessão isola os contextos da query, e a flag systemPrompt gerencia 
+  // o wrapper nativo do chat de cada modelo GGUF usando Jinja templating.
   const session = new LlamaChatSession({
-    contextSequence: context.getSequence()
+    contextSequence: sequence,
+    systemPrompt: options.systemPrompt
   });
 
-  const response = await session.prompt(prompt, {
-    temperature: options.temperature ?? 0.7,
-    topP: options.topP ?? 0.9,
-    maxTokens: options.maxTokens ?? 1024,
-    onTextChunk(text: string) {
-      getParentPort().postMessage({
-        type: 'token',
-        id,
-        token: text
-      });
-    }
-  });
+  try {
+    const response = await session.prompt(prompt, {
+      temperature: options.temperature ?? 0.7,
+      topP: options.topP ?? 0.9,
+      maxTokens: options.maxTokens ?? 1024,
+      onTextChunk(text: string) {
+        getParentPort().postMessage({
+          type: 'token',
+          id,
+          token: text
+        });
+      }
+    });
 
-  const end = performance.now();
+    const end = performance.now();
 
-  getParentPort().postMessage({
-    type: 'done',
-    id,
-    text: response,
-    stats: {
-      generationTime: Math.round(end - start)
-    }
-  });
+    getParentPort().postMessage({
+      type: 'done',
+      id,
+      text: response,
+      stats: {
+        generationTime: Math.round(end - start)
+      }
+    });
+  } finally {
+    // ESSENTIAL: For stateless single-turn RAG generation, we MUST dispose 
+    // the sequence back to the context. Otherwise, memory leaks block subsequent queries 
+    // with 'No sequences left' crashes.
+    sequence.dispose();
+  }
 }
 
 function handleDispose() {

@@ -55,6 +55,23 @@ contextBridge.exposeInMainWorld('api', {
     return ipcRenderer.invoke('search:query', query, options)
   },
 
+  // ── RAG ─────────────────────────────────────────────────────────────────────
+  askRAG(question: string, options?: import('../src/shared/types').RAGOptions): Promise<void> {
+    return ipcRenderer.invoke('rag:query', question, options)
+  },
+
+  onRAGToken(cb: (token: string) => void): () => void {
+    const listener = (_event: Electron.IpcRendererEvent, token: string) => cb(token)
+    ipcRenderer.on('rag:token', listener)
+    return () => ipcRenderer.off('rag:token', listener)
+  },
+
+  onRAGDone(cb: (response: import('../src/shared/types').RAGResponse) => void): () => void {
+    const listener = (_event: Electron.IpcRendererEvent, response: import('../src/shared/types').RAGResponse) => cb(response)
+    ipcRenderer.on('rag:done', listener)
+    return () => ipcRenderer.off('rag:done', listener)
+  },
+
   // ── Window controls ─────────────────────────────────────────────────────────
   windowMinimize(): void {
     ipcRenderer.send('window:minimize')

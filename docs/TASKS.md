@@ -662,7 +662,7 @@ interface RAGResponse {
 
 ---
 
-## [ ] TASK 3.3 — Chat UI Funcional (RAG Streaming)
+## [x] TASK 3.3 — Chat UI Funcional (RAG Streaming)
 
 **Objetivo:** Conectar a tela de Chat ao RAG com streaming de tokens. User faz pergunta → resposta aparece token por token.
 
@@ -692,14 +692,14 @@ onRAGDone(cb: (response: RAGResponse) => void): void
 5. Scroll automático acompanha novos tokens
 
 **Critérios de aceitação:**
-- [ ] Digitar pergunta → resposta da IA aparece com streaming
-- [ ] Tokens aparecem suavemente (sem flash/flicker)
-- [ ] Citations (chunks fonte) exibidos após resposta
-- [ ] Indicador de "pensando" enquanto IA processa
-- [ ] Latency metrics exibidas (tempo de busca + geração)
-- [ ] Funciona sem LLM (fallback: mostra chunks encontrados)
-- [ ] Zero dados mockados na Chat page
-- [ ] Scroll acompanha tokens novos
+- [x] Digitar pergunta → resposta da IA aparece com streaming
+- [x] Tokens aparecem suavemente (sem flash/flicker)
+- [x] Citations (chunks fonte) exibidos após resposta
+- [x] Indicador de "pensando" enquanto IA processa
+- [x] Latency metrics exibidas (tempo de busca + geração)
+- [x] Funciona sem LLM (fallback: mostra chunks encontrados)
+- [x] Zero dados mockados na Chat page
+- [x] Scroll acompanha tokens novos
 
 ---
 

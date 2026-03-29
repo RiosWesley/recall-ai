@@ -559,7 +559,7 @@ class VectorRepository {
     const beta = 1 - alpha;
     const fetchCount = topK * 5;
     const semTable = chatId ? "vectors v JOIN chunks c ON c.id = v.chunk_id" : "vectors v";
-    const semWhere = chatId ? "v.embedding MATCH ? AND c.chat_id = ?" : "v.embedding MATCH ?";
+    const semWhere = chatId ? "v.embedding MATCH ? AND v.k = ? AND c.chat_id = ?" : "v.embedding MATCH ? AND v.k = ?";
     const kwTable = chatId ? "chunks_fts f JOIN chunks c ON c.id = f.chunk_id" : "chunks_fts f";
     const kwWhere = chatId ? "f.content MATCH ? AND c.chat_id = ?" : "f.content MATCH ?";
     const sql = `
@@ -568,7 +568,6 @@ class VectorRepository {
                row_number() OVER (ORDER BY v.distance ASC) as sem_rank
         FROM ${semTable}
         WHERE ${semWhere}
-        LIMIT ?
       ),
       keyword AS (
         SELECT f.chunk_id, f.rank as kw_score,
@@ -592,8 +591,8 @@ class VectorRepository {
     `;
     const params = [];
     params.push(buffer);
-    if (chatId) params.push(chatId);
     params.push(fetchCount);
+    if (chatId) params.push(chatId);
     params.push(queryText);
     if (chatId) params.push(chatId);
     params.push(fetchCount);
@@ -1565,7 +1564,8 @@ const _SearchService = class _SearchService {
       }
     }
     const searchStart = performance.now();
-    const vectorResults = isHybrid ? this.vectorRepo.hybridSearch(queryEmbedding, query, limit, 0.7, chatId) : this.vectorRepo.search(queryEmbedding, limit, chatId);
+    const ftsQuery = query.replace(/[^\p{L}\p{N}\s_]/gu, " ").replace(/\s+/g, " ").trim();
+    const vectorResults = isHybrid && ftsQuery.length > 0 ? this.vectorRepo.hybridSearch(queryEmbedding, ftsQuery, limit, 0.7, chatId) : this.vectorRepo.search(queryEmbedding, limit, chatId);
     const chunkIds = vectorResults.map((v) => v.chunk_id);
     const chunks = this.chunkRepo.findByIds(chunkIds);
     const chunkMap = new Map(chunks.map((c) => [c.id, c]));
@@ -1625,6 +1625,7 @@ function registerSearchHandlers() {
     }
   });
 }
+const _dirname = typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 const _LLMService = class _LLMService {
   constructor() {
     __publicField(this, "worker", null);
@@ -1646,7 +1647,7 @@ const _LLMService = class _LLMService {
         console.log("[LLMService] Resolving LLM model path...");
         const modelPath = await ModelManager.getInstance().resolve("llm");
         console.log("[LLMService] Forking Utility Process...");
-        const workerPath = path.join(__dirname, "llm-worker.js");
+        const workerPath = path.join(_dirname, "llm-worker.js");
         this.worker = utilityProcess.fork(workerPath, [], {
           stdio: "inherit"
           // Permite ler a stdout/stderr do child process no terminal
@@ -1771,17 +1772,17 @@ let LLMService = _LLMService;
 const promptTemplates = {
   buildRAGPrompt: (question, chunks) => {
     const formattedChunks = chunks.map((c) => `[${c.date} - ${c.sender}]: ${c.content}`).join("\n\n");
-    return `<|system|>
-Você é um assistente que responde perguntas sobre conversas de chat.
-Baseie suas respostas APENAS no contexto fornecido.
-Se a informação não estiver no contexto, diga "Não encontrei essa informação."
-Seja conciso e direto.
-<|end|>
-<|context|>
+    const systemPrompt = `Você é um assistente encarregado de ler históricos de chat. Responda apenas com o que estiver no contexto.`;
+    const userPrompt = `Contexto das mensagens (Lido do Banco de Dados):
 ${formattedChunks}
-<|end|>
 
-Pergunta: ${question}`;
+Pergunta do usuário: ${question}
+
+Instruções finais:
+1. Revise se o contexto nomeia os jogos.
+2. Se NÃO houver jogos listados no contexto, responda: "O contexto não tem certeza do jogo procurado".
+3. NÃO sugira jogos (como Minecraft, Among Us, etc) se não estiverem no contexto acima.`;
+    return { systemPrompt, userPrompt };
   }
 };
 const _RAGService = class _RAGService {
@@ -1821,21 +1822,22 @@ const _RAGService = class _RAGService {
           latency
         };
       }
-      const prompt = promptTemplates.buildRAGPrompt(question, context);
+      const { systemPrompt, userPrompt } = promptTemplates.buildRAGPrompt(question, context);
       const generationStart = performance.now();
       const llmService = LLMService.getInstance();
       let answer = "";
       let tokensUsed = 0;
       try {
         answer = await llmService.generateStream(
-          prompt,
+          userPrompt,
           (token) => {
             tokensUsed++;
             if (onToken) onToken(token);
           },
           {
             temperature: options == null ? void 0 : options.temperature,
-            maxTokens: (options == null ? void 0 : options.maxTokens) || 1024
+            maxTokens: (options == null ? void 0 : options.maxTokens) || 1024,
+            systemPrompt
           }
         );
       } catch (llmError) {

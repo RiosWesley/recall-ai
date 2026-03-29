@@ -1,23 +1,23 @@
 import type { SearchResult } from '../../shared/types'
 
 export const promptTemplates = {
-  buildRAGPrompt: (question: string, chunks: SearchResult[]): string => {
+  buildRAGPrompt: (question: string, chunks: SearchResult[]): { systemPrompt: string, userPrompt: string } => {
     const formattedChunks = chunks
       .map(c => `[${c.date} - ${c.sender}]: ${c.content}`)
       .join('\n\n')
 
-    // System instruction must follow ARCHITECTURE.md format
-    // Although LLMs differ in special tokens, we adhere to the spec:
-    return `<|system|>
-Você é um assistente que responde perguntas sobre conversas de chat.
-Baseie suas respostas APENAS no contexto fornecido.
-Se a informação não estiver no contexto, diga "Não encontrei essa informação."
-Seja conciso e direto.
-<|end|>
-<|context|>
-${formattedChunks}
-<|end|>
+    const systemPrompt = `Você é um assistente encarregado de ler históricos de chat. Responda apenas com o que estiver no contexto.`;
 
-Pergunta: ${question}`
+    const userPrompt = `Contexto das mensagens (Lido do Banco de Dados):
+${formattedChunks}
+
+Pergunta do usuário: ${question}
+
+Instruções finais:
+1. Revise se o contexto nomeia os jogos.
+2. Se NÃO houver jogos listados no contexto, responda: "O contexto não tem certeza do jogo procurado".
+3. NÃO sugira jogos (como Minecraft, Among Us, etc) se não estiverem no contexto acima.`;
+
+    return { systemPrompt, userPrompt }
   }
 }

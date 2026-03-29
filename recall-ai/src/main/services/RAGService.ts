@@ -57,7 +57,7 @@ export class RAGService {
       }
 
       // 4. Prompt Construction
-      const prompt = promptTemplates.buildRAGPrompt(question, context)
+      const { systemPrompt, userPrompt } = promptTemplates.buildRAGPrompt(question, context)
 
       // 5. Generation
       const generationStart = performance.now()
@@ -68,14 +68,15 @@ export class RAGService {
 
       try {
         answer = await llmService.generateStream(
-          prompt,
+          userPrompt,
           (token) => {
             tokensUsed++
             if (onToken) onToken(token)
           },
           {
             temperature: options?.temperature,
-            maxTokens: options?.maxTokens || 1024
+            maxTokens: options?.maxTokens || 1024,
+            systemPrompt: systemPrompt
           }
         )
       } catch (llmError) {

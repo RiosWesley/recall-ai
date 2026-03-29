@@ -1,15 +1,19 @@
 import { utilityProcess, type UtilityProcess } from 'electron';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { nanoid } from 'nanoid';
 import { ModelManager } from './ModelManager';
 import { MODEL_REGISTRY } from './modelRegistry';
-// fileURLToPath is not strictly needed if we're bundled to commonjs and __dirname works,
-// but let's stick to Node.js / Vite polyfilled __dirname
+
+const _dirname = typeof __dirname !== 'undefined'
+  ? __dirname
+  : path.dirname(fileURLToPath(import.meta.url));
 
 export interface GenerateOptions {
   temperature?: number;
   topP?: number;
   maxTokens?: number;
+  systemPrompt?: string;
 }
 
 export interface ModelInfo {
@@ -45,9 +49,8 @@ export class LLMService {
 
         console.log('[LLMService] Forking Utility Process...');
         
-        // Em production/dist-electron, __dirname aponta para dist-electron
         // Onde o llm-worker.js também reside, pois adicionamos no rollupOptions
-        const workerPath = path.join(__dirname, 'llm-worker.js');
+        const workerPath = path.join(_dirname, 'llm-worker.js');
         
         this.worker = utilityProcess.fork(workerPath, [], {
           stdio: 'inherit' // Permite ler a stdout/stderr do child process no terminal

@@ -11,14 +11,10 @@ interface Message {
   id: string
   role: 'user' | 'ai'
   content: string
-  sources?: string[]
+  sources?: { meta: string, text: string }[]
   isStreaming?: boolean
+  latency?: import('../shared/types').RAGLatency
 }
-
-const MOCK_SOURCES = [
-  'Maria — Família · 14 mar 2024 · 19:15',
-  'Maria — Família · 15 mar 2024 · 09:33',
-]
 
 const INITIAL_MESSAGES: Message[] = [
   {
@@ -49,32 +45,72 @@ export default function ChatPage({ chatId }: ChatPageProps) {
     setInput('')
     setIsThinking(true)
 
-    // Simulate RAG + streaming
-    await sleep(800)
-
     const aiMsgId = `a${Date.now()}`
-    const fullResponse = `Encontrei referências sobre isso nas suas conversas com Maria. Ela enviou uma receita de bolo de cenoura no dia 14 de março de 2024, mencionando que o segredo é usar cenoura bem fresca e não bater demais na batedeira. No dia seguinte, você confirmou que anotou a receita e pretendia tentar fazer no final de semana.`
+    let isFirstToken = true
 
-    // Streaming effect
-    setMessages(prev => [...prev, {
-      id: aiMsgId,
-      role: 'ai',
-      content: '',
-      sources: MOCK_SOURCES,
-      isStreaming: true,
-    }])
-    setIsThinking(false)
+    const unsubToken = window.api.onRAGToken((token) => {
+      if (isFirstToken) {
+        setIsThinking(false)
+        isFirstToken = false
+        setMessages(prev => [...prev, {
+          id: aiMsgId,
+          role: 'ai',
+          content: token,
+          isStreaming: true,
+        }])
+      } else {
+        setMessages(prev => prev.map(m =>
+          m.id === aiMsgId ? { ...m, content: m.content + token } : m
+        ))
+      }
+    })
 
-    for (let i = 0; i <= fullResponse.length; i++) {
-      await sleep(18)
-      setMessages(prev => prev.map(m =>
-        m.id === aiMsgId ? { ...m, content: fullResponse.slice(0, i) } : m
-      ))
+    const unsubDone = window.api.onRAGDone((response) => {
+      unsubToken()
+      unsubDone()
+
+      const citations = response.context ? response.context.map((c: any) => ({
+        meta: `${c.chatName} · ${c.date} ${c.sender !== 'System' ? `· ${c.sender}` : ''}`,
+        text: c.content
+      })) : []
+
+      if (isFirstToken) {
+        setIsThinking(false)
+        setMessages(prev => [...prev, {
+          id: aiMsgId,
+          role: 'ai',
+          content: response.answer || 'Não encontrei uma resposta.',
+          isStreaming: false,
+          sources: citations.length > 0 ? citations : undefined,
+          latency: response.latency,
+        }])
+      } else {
+        setMessages(prev => prev.map(m =>
+          m.id === aiMsgId ? {
+            ...m,
+            isStreaming: false,
+            content: response.answer,
+            sources: citations.length > 0 ? citations : undefined,
+            latency: response.latency,
+          } : m
+        ))
+      }
+    })
+
+    try {
+      await window.api.askRAG(text, { chatId: chatId || undefined })
+    } catch (err: any) {
+      unsubToken()
+      unsubDone()
+      if (isFirstToken) setIsThinking(false)
+      
+      setMessages(prev => [...prev, {
+        id: `e${Date.now()}`,
+        role: 'ai',
+        content: `❌ **Erro:** ${err.message || 'Falha ao processar a pergunta.'}`,
+        isStreaming: false,
+      }])
     }
-
-    setMessages(prev => prev.map(m =>
-      m.id === aiMsgId ? { ...m, isStreaming: false } : m
-    ))
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -161,22 +197,56 @@ export default function ChatPage({ chatId }: ChatPageProps) {
                 {showSources === msg.id && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', animation: 'fadeInUp 0.2s ease' }}>
                     {msg.sources.map((s, i) => (
-                      <div key={i} className="citation-chip">
-                        <span style={{
-                          fontFamily: 'var(--font-mono)',
-                          fontSize: '9px',
-                          color: 'var(--accent-emerald)',
-                          background: 'var(--accent-emerald-subtle)',
-                          padding: '0 4px',
-                          borderRadius: '2px',
-                        }}>
-                          [{i + 1}]
-                        </span>
-                        {s}
+                      <div key={i} className="citation-chip" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', padding: '10px', background: 'var(--bg-subtle)', borderRadius: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                          <span style={{
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '9px',
+                            color: 'var(--accent-emerald)',
+                            background: 'var(--accent-emerald-subtle)',
+                            padding: '0 4px',
+                            borderRadius: '2px',
+                          }}>
+                            [{i + 1}]
+                          </span>
+                          <span style={{ color: 'var(--text-disabled)', fontSize: '10px' }}>{s.meta || (typeof s === 'string' ? 'Memória Antiga' : '')}</span>
+                        </div>
+                        <div style={{ color: 'var(--text-secondary)', fontSize: '12px', lineHeight: '1.5', whiteSpace: 'pre-wrap', wordBreak: 'break-word', userSelect: 'text' }}>
+                          {s.text || (typeof s === 'string' ? s : 'Sem conteúdo armazenado')}
+                        </div>
                       </div>
                     ))}
+                    {msg.latency && (
+                      <div style={{
+                        marginTop: '4px',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: '9px',
+                        color: 'var(--text-disabled)',
+                        display: 'flex',
+                        gap: '8px',
+                        borderTop: '1px solid var(--border-subtle)',
+                        paddingTop: '6px'
+                      }}>
+                        <span>busca: {(msg.latency.embedding + msg.latency.search).toFixed(0)}ms</span>
+                        <span>geração: {msg.latency.generation.toFixed(0)}ms</span>
+                      </div>
+                    )}
                   </div>
                 )}
+              </div>
+            )}
+            
+            {!msg.sources && msg.latency && !msg.isStreaming && (
+              <div style={{
+                marginTop: '12px',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '9px',
+                color: 'var(--text-disabled)',
+                display: 'flex',
+                gap: '8px',
+              }}>
+                <span>busca: {(msg.latency.embedding + msg.latency.search).toFixed(0)}ms</span>
+                <span>geração: {msg.latency.generation.toFixed(0)}ms</span>
               </div>
             )}
           </div>
@@ -239,6 +309,3 @@ export default function ChatPage({ chatId }: ChatPageProps) {
   )
 }
 
-function sleep(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}

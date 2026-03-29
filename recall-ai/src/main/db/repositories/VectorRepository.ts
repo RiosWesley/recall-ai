@@ -116,7 +116,7 @@ export class VectorRepository {
     const fetchCount = topK * 5
 
     const semTable = chatId ? 'vectors v JOIN chunks c ON c.id = v.chunk_id' : 'vectors v'
-    const semWhere = chatId ? 'v.embedding MATCH ? AND c.chat_id = ?' : 'v.embedding MATCH ?'
+    const semWhere = chatId ? 'v.embedding MATCH ? AND v.k = ? AND c.chat_id = ?' : 'v.embedding MATCH ? AND v.k = ?'
     
     const kwTable = chatId ? 'chunks_fts f JOIN chunks c ON c.id = f.chunk_id' : 'chunks_fts f'
     const kwWhere = chatId ? 'f.content MATCH ? AND c.chat_id = ?' : 'f.content MATCH ?'
@@ -127,7 +127,6 @@ export class VectorRepository {
                row_number() OVER (ORDER BY v.distance ASC) as sem_rank
         FROM ${semTable}
         WHERE ${semWhere}
-        LIMIT ?
       ),
       keyword AS (
         SELECT f.chunk_id, f.rank as kw_score,
@@ -154,8 +153,8 @@ export class VectorRepository {
     
     // Semantic params
     params.push(buffer)
+    params.push(fetchCount) // For v.k = ?
     if (chatId) params.push(chatId)
-    params.push(fetchCount)
     
     // Keyword params
     params.push(queryText)

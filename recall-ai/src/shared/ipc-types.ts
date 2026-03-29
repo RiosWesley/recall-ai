@@ -46,6 +46,11 @@ export interface ElectronAPI {
   // ── Search ──────────────────────────────────────────────────────────────────
   search(query: string, options?: SearchOptions): Promise<SearchResult[]>
 
+  // ── RAG ─────────────────────────────────────────────────────────────────────
+  askRAG(question: string, options?: import('./types').RAGOptions): Promise<void>
+  onRAGToken(cb: (token: string) => void): () => void
+  onRAGDone(cb: (response: import('./types').RAGResponse) => void): () => void
+
   // ── Window controls ─────────────────────────────────────────────────────────
   windowMinimize(): void
   windowMaximize(): void
