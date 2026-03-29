@@ -1,5 +1,5 @@
 import { ipcRenderer, contextBridge } from 'electron'
-import type { ImportProgress, ImportResult, Chat, ModelStatus, ModelDownloadProgress, ModelKey } from '../src/shared/types'
+import type { ImportProgress, ImportResult, Chat, ModelStatus, ModelDownloadProgress, ModelKey, SearchOptions, SearchResult } from '../src/shared/types'
 
 /**
  * Expose a typed, minimal API to the renderer process via contextBridge.
@@ -48,6 +48,11 @@ contextBridge.exposeInMainWorld('api', {
     const listener = (_event: Electron.IpcRendererEvent, progress: ModelDownloadProgress) => cb(progress)
     ipcRenderer.on('models:progress', listener)
     return () => ipcRenderer.off('models:progress', listener)
+  },
+
+  // ── Search ──────────────────────────────────────────────────────────────────
+  search(query: string, options?: SearchOptions): Promise<SearchResult[]> {
+    return ipcRenderer.invoke('search:query', query, options)
   },
 
   // ── Window controls ─────────────────────────────────────────────────────────

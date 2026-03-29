@@ -88,6 +88,25 @@ export interface VectorResult {
   distance: number
 }
 
+// ─── SEARCH ──────────────────────────────────────────────────────────────────
+
+export interface SearchOptions {
+  hybrid?: boolean
+  chatId?: string
+  limit?: number
+}
+
+export interface SearchResult {
+  id: string
+  chatId: string
+  chatName: string
+  score: number // Similarity score (0-1)
+  content: string // Formatted string with highlight <mark>
+  date: string // Display date
+  sender: string
+  chunkId: string
+}
+
 // ─── QUERY CACHE ─────────────────────────────────────────────────────────────
 
 export interface QueryCache {

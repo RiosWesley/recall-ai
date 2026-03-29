@@ -57,8 +57,9 @@ export class VectorRepository {
    * Perform a KNN search for the closest chunks to a query embedding.
    * @param queryEmbedding - Float32Array of length 384
    * @param topK - Number of results to return
+   * @param chatId - Optional chat ID to filter results by
    */
-  search(queryEmbedding: Float32Array, topK = 10): VectorResult[] {
+  search(queryEmbedding: Float32Array, topK = 10, chatId?: string): VectorResult[] {
     if (!this.isAvailable) {
       console.warn('[VectorRepository] sqlite-vec not available — returning empty results')
       return []
@@ -66,13 +67,24 @@ export class VectorRepository {
 
     const buffer = Buffer.from(queryEmbedding.buffer)
 
-    const rows = this.db.prepare(`
-      SELECT chunk_id, distance
-      FROM vectors
-      WHERE embedding MATCH ?
-      ORDER BY distance ASC
-      LIMIT ?
-    `).all(buffer, topK) as VectorResult[]
+    let sql = `
+      SELECT v.chunk_id, v.distance
+      FROM vectors v
+    `
+    const params: any[] = [buffer]
+
+    if (chatId) {
+      sql += ` JOIN chunks c ON c.id = v.chunk_id
+      WHERE v.embedding MATCH ? AND c.chat_id = ? `
+      params.push(chatId)
+    } else {
+      sql += ` WHERE v.embedding MATCH ? `
+    }
+
+    sql += ` ORDER BY v.distance ASC LIMIT ? `
+    params.push(topK)
+
+    const rows = this.db.prepare(sql).all(...params) as VectorResult[]
 
     return rows
   }
@@ -84,16 +96,18 @@ export class VectorRepository {
    * @param queryText - Original query string for FTS5
    * @param topK - Number of results
    * @param alpha - Weight for semantic score (1 - alpha = FTS5 weight). Default 0.7
+   * @param chatId - Optional chat ID to filter results by
    */
   hybridSearch(
     queryEmbedding: Float32Array,
     queryText: string,
     topK = 10,
     alpha = 0.7,
+    chatId?: string
   ): VectorResult[] {
     if (!this.isAvailable) {
       // Fallback to FTS5 only
-      return this.ftsOnly(queryText, topK)
+      return this.ftsOnly(queryText, topK, chatId)
     }
 
     const buffer = Buffer.from(queryEmbedding.buffer)
@@ -101,19 +115,25 @@ export class VectorRepository {
     // We fetch a bit more than topK internally to improve RRF overlap quality
     const fetchCount = topK * 5
 
-    const rows = this.db.prepare(`
+    const semTable = chatId ? 'vectors v JOIN chunks c ON c.id = v.chunk_id' : 'vectors v'
+    const semWhere = chatId ? 'v.embedding MATCH ? AND c.chat_id = ?' : 'v.embedding MATCH ?'
+    
+    const kwTable = chatId ? 'chunks_fts f JOIN chunks c ON c.id = f.chunk_id' : 'chunks_fts f'
+    const kwWhere = chatId ? 'f.content MATCH ? AND c.chat_id = ?' : 'f.content MATCH ?'
+
+    const sql = `
       WITH semantic AS (
-        SELECT chunk_id, distance as sem_dist,
-               row_number() OVER (ORDER BY distance ASC) as sem_rank
-        FROM vectors
-        WHERE embedding MATCH ?
+        SELECT v.chunk_id, v.distance as sem_dist,
+               row_number() OVER (ORDER BY v.distance ASC) as sem_rank
+        FROM ${semTable}
+        WHERE ${semWhere}
         LIMIT ?
       ),
       keyword AS (
-        SELECT chunk_id, rank as kw_score,
-               row_number() OVER (ORDER BY rank ASC) as kw_rank
-        FROM chunks_fts
-        WHERE content MATCH ?
+        SELECT f.chunk_id, f.rank as kw_score,
+               row_number() OVER (ORDER BY f.rank ASC) as kw_rank
+        FROM ${kwTable}
+        WHERE ${kwWhere}
         LIMIT ?
       ),
       combined AS (
@@ -128,7 +148,26 @@ export class VectorRepository {
       FROM combined
       ORDER BY score DESC
       LIMIT ?
-    `).all(buffer, fetchCount, queryText, fetchCount, alpha, beta, topK) as VectorResult[]
+    `
+
+    const params: any[] = []
+    
+    // Semantic params
+    params.push(buffer)
+    if (chatId) params.push(chatId)
+    params.push(fetchCount)
+    
+    // Keyword params
+    params.push(queryText)
+    if (chatId) params.push(chatId)
+    params.push(fetchCount)
+    
+    // RRF params
+    params.push(alpha)
+    params.push(beta)
+    params.push(topK)
+
+    const rows = this.db.prepare(sql).all(...params) as VectorResult[]
 
     return rows
   }
@@ -174,15 +213,23 @@ export class VectorRepository {
   }
 
   /** Pure FTS5 fallback when sqlite-vec is unavailable. */
-  private ftsOnly(queryText: string, topK: number): VectorResult[] {
+  private ftsOnly(queryText: string, topK: number, chatId?: string): VectorResult[] {
     try {
-      const rows = this.db.prepare(`
-        SELECT chunk_id, rank as distance
-        FROM chunks_fts
-        WHERE content MATCH ?
-        ORDER BY rank
-        LIMIT ?
-      `).all(queryText, topK) as VectorResult[]
+      let sql = 'SELECT f.chunk_id, f.rank as distance FROM chunks_fts f'
+      const params: any[] = []
+
+      if (chatId) {
+        sql += ' JOIN chunks c ON c.id = f.chunk_id WHERE f.content MATCH ? AND c.chat_id = ?'
+        params.push(queryText, chatId)
+      } else {
+        sql += ' WHERE f.content MATCH ?'
+        params.push(queryText)
+      }
+
+      sql += ' ORDER BY f.rank LIMIT ?'
+      params.push(topK)
+
+      const rows = this.db.prepare(sql).all(...params) as VectorResult[]
 
       return rows
     } catch {

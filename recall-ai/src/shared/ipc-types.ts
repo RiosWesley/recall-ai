@@ -3,7 +3,7 @@
  * The renderer accesses these via `window.api`.
  */
 
-import type { Chat, ImportResult, ImportProgress, ModelStatus, ModelDownloadProgress, ModelKey } from './types'
+import type { Chat, ImportResult, ImportProgress, ModelStatus, ModelDownloadProgress, ModelKey, SearchOptions, SearchResult } from './types'
 
 export interface ElectronAPI {
   // ── Import ──────────────────────────────────────────────────────────────────
@@ -42,6 +42,9 @@ export interface ElectronAPI {
    * Returns an unsubscribe function to clean up the listener.
    */
   onModelProgress(cb: (progress: ModelDownloadProgress) => void): () => void
+
+  // ── Search ──────────────────────────────────────────────────────────────────
+  search(query: string, options?: SearchOptions): Promise<SearchResult[]>
 
   // ── Window controls ─────────────────────────────────────────────────────────
   windowMinimize(): void

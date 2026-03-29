@@ -490,7 +490,7 @@ LIMIT ?
 
 ---
 
-## [ ] TASK 2.5 — Search UI Funcional
+## [x] TASK 2.5 — Search UI Funcional
 
 **Objetivo:** Conectar a página de busca ao backend. Query → embedding → KNN → exibir chunks reais.
 
@@ -528,15 +528,15 @@ search(query: string, options?: SearchOptions): Promise<SearchResult[]>
 ```
 
 **Critérios de aceitação:**
-- [ ] Digitar "receita de bolo" → retorna chunks relevantes de chats reais importados
-- [ ] Resultados ordenados por relevância (similaridade cosine)
-- [ ] Cada resultado mostra: trecho, chat de origem, data, participantes
-- [ ] Busca em < 100ms para datasets de 10k chunks
-- [ ] Busca híbrida (semântica + keyword) funciona
-- [ ] Filtro por chat funciona
-- [ ] Estado de loading durante a busca
-- [ ] Estado vazio ("nenhum resultado") quando sem matches
-- [ ] Zero dados mockados na Search page
+- [x] Digitar "receita de bolo" → retorna chunks relevantes de chats reais importados
+- [x] Resultados ordenados por relevância (similaridade cosine)
+- [x] Cada resultado mostra: trecho, chat de origem, data, participantes
+- [x] Busca em < 100ms para datasets de 10k chunks
+- [x] Busca híbrida (semântica + keyword) funciona
+- [x] Filtro por chat funciona
+- [x] Estado de loading durante a busca
+- [x] Estado vazio ("nenhum resultado") quando sem matches
+- [x] Zero dados mockados na Search page
 
 **🏁 MILESTONE: MVP 1 — Busca Semântica Funcional**
 
