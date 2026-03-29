@@ -359,7 +359,7 @@ src/main/services/
 
 ---
 
-## [ ] TASK 2.2 — Embedding Service (node-llama-cpp)
+## [x] TASK 2.2 — Embedding Service (node-llama-cpp)
 
 **Objetivo:** Integrar node-llama-cpp para gerar embeddings com all-MiniLM-L6-v2 no main process.
 
