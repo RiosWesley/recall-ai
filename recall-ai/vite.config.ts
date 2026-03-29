@@ -17,7 +17,7 @@ export default defineConfig({
             rollupOptions: {
               // Native modules must be treated as external —
               // they cannot be bundled by Rollup/Vite
-              external: ['better-sqlite3', 'sqlite-vec'],
+              external: ['better-sqlite3', 'sqlite-vec', 'node-llama-cpp'],
             },
           },
         },

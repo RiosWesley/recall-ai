@@ -3,6 +3,10 @@ import { app } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { runMigrations } from './migrations/001_initial'
+import { fileURLToPath } from 'node:url'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 let instance: Database.Database | null = null
 
