@@ -12,8 +12,8 @@ import { createInterface } from "node:readline";
 import { resolveModelFile, createModelDownloader, getLlama } from "node-llama-cpp";
 import fs$1 from "fs";
 import path$1 from "path";
-const MIGRATION_ID = "001_initial";
-const SCHEMA_SQL = `
+const MIGRATION_ID$1 = "001_initial";
+const SCHEMA_SQL$1 = `
   -- ============================================================
   -- CHATS — imported WhatsApp conversations
   -- ============================================================
@@ -129,15 +129,15 @@ function runMigrations(db) {
   db.exec(MIGRATIONS_TABLE_SQL);
   const existing = db.prepare(
     "SELECT id FROM _migrations WHERE id = ?"
-  ).get(MIGRATION_ID);
+  ).get(MIGRATION_ID$1);
   if (existing) {
     console.log("[DB] Migration 001_initial already applied — skipping");
     return;
   }
   console.log("[DB] Running migration 001_initial...");
   db.transaction(() => {
-    db.exec(SCHEMA_SQL);
-    const hasSqliteVec = isSqliteVecLoaded(db);
+    db.exec(SCHEMA_SQL$1);
+    const hasSqliteVec = isSqliteVecLoaded$1(db);
     if (hasSqliteVec) {
       console.log("[DB] sqlite-vec detected — creating vectors + chunks_fts tables");
       db.exec(VIRTUAL_TABLES_SQL);
@@ -147,9 +147,84 @@ function runMigrations(db) {
     }
     db.prepare(
       "INSERT INTO _migrations (id) VALUES (?)"
-    ).run(MIGRATION_ID);
+    ).run(MIGRATION_ID$1);
   })();
   console.log("[DB] Migration 001_initial complete");
+}
+function isSqliteVecLoaded$1(db) {
+  try {
+    db.prepare("SELECT vec_version()").get();
+    return true;
+  } catch {
+    return false;
+  }
+}
+const MIGRATION_ID = "002_add_profile_facts";
+const SCHEMA_SQL = `
+  -- ============================================================
+  -- PROFILE FACTS — synthetic sentences about conversation patterns
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS profile_facts (
+    id TEXT PRIMARY KEY,
+    contact_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    category TEXT, -- 'frequent_term', 'topic', 'dynamics', 'co_occurrence'
+    text TEXT NOT NULL,
+    evidence INTEGER DEFAULT 1,
+    embedding BLOB, -- serialized Float32Array (nomic-embed-text)
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+  );
+
+  -- Index to speed up retrieval by contact
+  CREATE INDEX IF NOT EXISTS idx_profile_facts_contact ON profile_facts(contact_id);
+`;
+const FTS5_SQL = `
+  -- FTS5 table for profile_facts mapping rowid to id
+  CREATE VIRTUAL TABLE IF NOT EXISTS profile_facts_fts USING fts5(
+    text,
+    fact_id UNINDEXED,
+    tokenize='unicode61 remove_diacritics 2'
+  );
+
+  -- Triggers to auto-sync FTS table
+  CREATE TRIGGER IF NOT EXISTS facts_ai AFTER INSERT ON profile_facts 
+  BEGIN
+    INSERT INTO profile_facts_fts(rowid, text, fact_id) VALUES (new.rowid, new.text, new.id);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS facts_ad AFTER DELETE ON profile_facts 
+  BEGIN
+    DELETE FROM profile_facts_fts WHERE fact_id = old.id;
+  END;
+`;
+const VECTORS_SQL = `
+  -- SQLite-vec table for semantic search on profile_facts
+  -- Use vec0 for dynamic loading
+  CREATE VIRTUAL TABLE IF NOT EXISTS profile_facts_vectors USING vec0(
+    fact_id TEXT PRIMARY KEY,
+    embedding FLOAT[768]
+  );
+`;
+function runMigration002(db) {
+  const existing = db.prepare(
+    "SELECT id FROM _migrations WHERE id = ?"
+  ).get(MIGRATION_ID);
+  if (existing) {
+    console.log("[DB] Migration 002_add_profile_facts already applied — skipping");
+    return;
+  }
+  console.log("[DB] Running migration 002_add_profile_facts...");
+  db.transaction(() => {
+    db.exec(SCHEMA_SQL);
+    db.exec(FTS5_SQL);
+    if (isSqliteVecLoaded(db)) {
+      console.log("[DB] sqlite-vec detected — creating profile_facts_vectors table");
+      db.exec(VECTORS_SQL);
+    }
+    db.prepare(
+      "INSERT INTO _migrations (id) VALUES (?)"
+    ).run(MIGRATION_ID);
+  })();
+  console.log("[DB] Migration 002_add_profile_facts complete");
 }
 function isSqliteVecLoaded(db) {
   try {
@@ -178,6 +253,7 @@ const _DatabaseService = class _DatabaseService {
     _DatabaseService.loadSqliteVec(db);
     _DatabaseService.db = db;
     runMigrations(db);
+    runMigration002(db);
     console.log("[DB] Database ready");
     return db;
   }
@@ -516,6 +592,25 @@ class VectorRepository {
     })(items);
   }
   /**
+   * Store multiple facts' embeddings in a single transaction.
+   * @param items - Array of { factId, embedding }
+   */
+  insertFactBatch(items) {
+    if (!this.isAvailable) {
+      console.warn("[VectorRepository] sqlite-vec not available — skipping fact batch insert");
+      return;
+    }
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO profile_facts_vectors (fact_id, embedding)
+      VALUES (?, ?)
+    `);
+    this.db.transaction((vectors) => {
+      for (const item of vectors) {
+        stmt.run(item.factId, Buffer.from(item.embedding.buffer));
+      }
+    })(items);
+  }
+  /**
    * Perform a KNN search for the closest chunks to a query embedding.
    * @param queryEmbedding - Float32Array of length 384
    * @param topK - Number of results to return
@@ -554,25 +649,58 @@ class VectorRepository {
    * @param chatId - Optional chat ID to filter results by
    */
   hybridSearch(queryEmbedding, queryText, topK = 10, alpha = 0.7, chatId) {
+    return this._hybridSearchCore(
+      "chunks",
+      "chunk_id",
+      "vectors",
+      "chunks_fts",
+      queryEmbedding,
+      queryText,
+      topK,
+      alpha,
+      chatId,
+      "chat_id",
+      "content"
+    );
+  }
+  /**
+   * Hybrid search optimized for Profile Facts.
+   */
+  hybridSearchFacts(queryEmbedding, queryText, topK = 10, alpha = 0.7, chatId) {
+    return this._hybridSearchCore(
+      "profile_facts",
+      "fact_id",
+      "profile_facts_vectors",
+      "profile_facts_fts",
+      queryEmbedding,
+      queryText,
+      topK,
+      alpha,
+      chatId,
+      "contact_id",
+      "text"
+    );
+  }
+  _hybridSearchCore(baseTable, idColumn, vecTable, ftsTable, queryEmbedding, queryText, topK, alpha, chatId, chatIdColumn = "chat_id", ftsContentColumn = "content") {
     if (!this.isAvailable) {
-      return this.ftsOnly(queryText, topK, chatId);
+      return this.ftsOnly(queryText, topK, chatId, ftsTable, baseTable, idColumn, chatIdColumn);
     }
     const buffer = Buffer.from(queryEmbedding.buffer);
     const beta = 1 - alpha;
     const fetchCount = topK * 5;
-    const semTable = chatId ? "vectors v JOIN chunks c ON c.id = v.chunk_id" : "vectors v";
-    const semWhere = chatId ? "v.embedding MATCH ? AND v.k = ? AND c.chat_id = ?" : "v.embedding MATCH ? AND v.k = ?";
-    const kwTable = chatId ? "chunks_fts f JOIN chunks c ON c.id = f.chunk_id" : "chunks_fts f";
-    const kwWhere = chatId ? "f.content MATCH ? AND c.chat_id = ?" : "f.content MATCH ?";
+    const semTable = chatId ? `${vecTable} v JOIN ${baseTable} c ON c.id = v.${idColumn}` : `${vecTable} v`;
+    const semWhere = chatId ? `v.embedding MATCH ? AND v.k = ? AND c.${chatIdColumn} = ?` : `v.embedding MATCH ? AND v.k = ?`;
+    const kwTable = chatId ? `${ftsTable} f JOIN ${baseTable} c ON c.id = f.${idColumn}` : `${ftsTable} f`;
+    const kwWhere = chatId ? `f.${ftsContentColumn} MATCH ? AND c.${chatIdColumn} = ?` : `f.${ftsContentColumn} MATCH ?`;
     const sql = `
       WITH semantic AS (
-        SELECT v.chunk_id, v.distance as sem_dist,
+        SELECT v.${idColumn} as record_id, v.distance as sem_dist,
                row_number() OVER (ORDER BY v.distance ASC) as sem_rank
         FROM ${semTable}
         WHERE ${semWhere}
       ),
       keyword AS (
-        SELECT f.chunk_id, f.rank as kw_score,
+        SELECT f.${idColumn} as record_id, f.rank as kw_score,
                row_number() OVER (ORDER BY f.rank ASC) as kw_rank
         FROM ${kwTable}
         WHERE ${kwWhere}
@@ -580,29 +708,24 @@ class VectorRepository {
       ),
       combined AS (
         SELECT
-          COALESCE(s.chunk_id, k.chunk_id) AS chunk_id,
+          COALESCE(s.record_id, k.record_id) AS record_id,
           (? * COALESCE(1.0 / (60.0 + s.sem_rank), 0.0))
           + (? * COALESCE(1.0 / (60.0 + k.kw_rank), 0.0)) AS score
         FROM semantic s
-        FULL OUTER JOIN keyword k ON s.chunk_id = k.chunk_id
+        FULL OUTER JOIN keyword k ON s.record_id = k.record_id
       )
-      SELECT chunk_id, (1.0 - score) AS distance
+      SELECT record_id as chunk_id, (1.0 - score) AS distance
       FROM combined
       ORDER BY score DESC
       LIMIT ?
     `;
     const params = [];
-    params.push(buffer);
-    params.push(fetchCount);
+    params.push(buffer, fetchCount);
     if (chatId) params.push(chatId);
     params.push(queryText);
     if (chatId) params.push(chatId);
-    params.push(fetchCount);
-    params.push(alpha);
-    params.push(beta);
-    params.push(topK);
-    const rows = this.db.prepare(sql).all(...params);
-    return rows;
+    params.push(fetchCount, alpha, beta, topK);
+    return this.db.prepare(sql).all(...params);
   }
   /**
    * Delete all vectors for a given chat's chunks.
@@ -644,22 +767,23 @@ class VectorRepository {
     }
   }
   /** Pure FTS5 fallback when sqlite-vec is unavailable. */
-  ftsOnly(queryText, topK, chatId) {
+  ftsOnly(queryText, topK, chatId, ftsTable = "chunks_fts", baseTable = "chunks", idColumn = "chunk_id", chatIdColumn = "chat_id") {
     try {
-      let sql = "SELECT f.chunk_id, f.rank as distance FROM chunks_fts f";
+      let sql = `SELECT f.${idColumn} as chunk_id, f.rank as distance FROM ${ftsTable} f`;
       const params = [];
+      const contentCol = ftsTable === "chunks_fts" ? "content" : "text";
       if (chatId) {
-        sql += " JOIN chunks c ON c.id = f.chunk_id WHERE f.content MATCH ? AND c.chat_id = ?";
+        sql += ` JOIN ${baseTable} c ON c.id = f.${idColumn} WHERE f.${contentCol} MATCH ? AND c.${chatIdColumn} = ?`;
         params.push(queryText, chatId);
       } else {
-        sql += " WHERE f.content MATCH ?";
+        sql += ` WHERE f.${contentCol} MATCH ?`;
         params.push(queryText);
       }
-      sql += " ORDER BY f.rank LIMIT ?";
+      sql += ` ORDER BY f.rank LIMIT ?`;
       params.push(topK);
-      const rows = this.db.prepare(sql).all(...params);
-      return rows;
-    } catch {
+      return this.db.prepare(sql).all(...params);
+    } catch (err) {
+      console.warn("[VectorRepository] ftsOnly failed:", err);
       return [];
     }
   }
@@ -996,7 +1120,7 @@ class TimeWindowStrategy {
 }
 function buildChunk(messages) {
   const participants = [...new Set(messages.map((m) => m.sender))];
-  const content = messages.filter((m) => m.type !== "system").map((m) => m.content).join("\n");
+  const content = messages.filter((m) => m.type !== "system").map((m) => `${m.sender}: ${m.content}`).join("\n");
   const displayContent = messages.map((m) => {
     const timeStr = formatTime(m.timestamp);
     return `${m.sender} [${timeStr}]: ${m.content}`;
@@ -1027,10 +1151,12 @@ function formatTime(unixSeconds) {
   return `${hh}:${mm}`;
 }
 const DEFAULT_CHUNKING_CONFIG = {
-  timeWindowSeconds: 5 * 60,
-  // 5 minutes
-  maxTokens: 256,
-  overlapMessages: 1
+  timeWindowSeconds: 10 * 60,
+  // 10 minutos (era 5)
+  maxTokens: 512,
+  // (era 256)
+  overlapMessages: 3
+  // (era 1)
 };
 class ChunkingEngine {
   constructor(config = {}) {
@@ -1442,6 +1568,297 @@ const EmbeddingService$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.
   __proto__: null,
   EmbeddingService
 }, Symbol.toStringTag, { value: "Module" }));
+const STOPWORDS = /* @__PURE__ */ new Set([
+  "que",
+  "não",
+  "pra",
+  "com",
+  "uma",
+  "por",
+  "mas",
+  "como",
+  "mais",
+  "isso",
+  "esse",
+  "essa",
+  "tem",
+  "tá",
+  "vai",
+  "vou",
+  "foi",
+  "era",
+  "são",
+  "nos",
+  "das",
+  "dos",
+  "ele",
+  "ela",
+  "meu",
+  "sua",
+  "seu",
+  "pro",
+  "sim",
+  "tbm",
+  "aqui",
+  "ali",
+  "hj",
+  "aí",
+  "né",
+  "tô",
+  "vc",
+  "voce",
+  "kkk",
+  "kkkk",
+  "kkkkk",
+  "haha",
+  "hahaha",
+  "rsrs",
+  "lol",
+  "para",
+  "nao",
+  "q",
+  "tb",
+  "da",
+  "de",
+  "do",
+  "e",
+  "o",
+  "a",
+  "os",
+  "as",
+  "em",
+  "um",
+  "umas",
+  "uns",
+  "no",
+  "na",
+  "se",
+  "ao",
+  "aos"
+]);
+function computeTermStats(messages) {
+  const stats = /* @__PURE__ */ new Map();
+  for (const msg of messages) {
+    if (msg.type !== "text") continue;
+    const words = msg.content.toLowerCase().replace(/[?.!,;:'"()\\[\\]{}]/g, "").split(/\\s+/).filter((w) => w.length >= 2 && !STOPWORDS.has(w));
+    const ngrams = [];
+    for (let n = 1; n <= 3; n++) {
+      for (let i = 0; i <= words.length - n; i++) {
+        const gram = words.slice(i, i + n).join(" ");
+        if (gram.length >= 3) {
+          ngrams.push(gram);
+        }
+      }
+    }
+    for (const gram of ngrams) {
+      const existing = stats.get(gram);
+      if (existing) {
+        existing.totalCount++;
+        existing.countBySender[msg.sender] = (existing.countBySender[msg.sender] || 0) + 1;
+        if (msg.timestamp < existing.firstSeen) existing.firstSeen = msg.timestamp;
+        if (msg.timestamp > existing.lastSeen) existing.lastSeen = msg.timestamp;
+        if (existing.sampleMessages.length < 5) {
+          const sample = `[${msg.sender}]: ${msg.content}`;
+          if (!existing.sampleMessages.includes(sample)) {
+            existing.sampleMessages.push(sample);
+          }
+        }
+      } else {
+        stats.set(gram, {
+          term: gram,
+          totalCount: 1,
+          countBySender: { [msg.sender]: 1 },
+          firstSeen: msg.timestamp,
+          lastSeen: msg.timestamp,
+          sampleMessages: [`[${msg.sender}]: ${msg.content}`]
+        });
+      }
+    }
+  }
+  const totalMsgs = messages.length;
+  return [...stats.values()].filter((s) => {
+    if (s.totalCount < 3) return false;
+    if (s.totalCount / totalMsgs > 0.3) return false;
+    if (/^\\d+$/.test(s.term)) return false;
+    return true;
+  }).sort((a, b) => b.totalCount - a.totalCount);
+}
+const TOPIC_PROBES = {
+  gaming: ["vamos jogar um jogo online video game pc console", "bora uma partida rankeada"],
+  going_out: ["vamos sair esse fim de semana bar festa role", "combinar de ir jantar almocar"],
+  tech: ["meu celular pc notebook formatar ssd", "aplicativo erro bug software hardware"],
+  work: ["trabalho reuniao chefe relatorio demanda", "meu trampo projeto cliente faturamento"],
+  study: ["tenho prova amanha faculdade escola curso", "preciso estudar tcc certificado apostila"],
+  relationships: ["brigou com o namorado relacionamento casal beijo", "to ficando sentindo saudade crush"],
+  food: ["pedir comida delivery ifood pizza lanche", "vamos comer onde janta almoco fome"],
+  media: ["assisti um filme muito bom cinema roteiro", "serie nova anime tv assistir ep"],
+  finances: ["me empresta um dinheiro pix banco nubank", "to sem grana preco caro barato salario"],
+  health: ["fui no medico hospital remedio farmacia", "to passando mal dor de cabeca febre tonto"]
+};
+const TOPIC_LABELS = {
+  gaming: "jogos e partidas",
+  going_out: "sair e encontros",
+  tech: "tecnologia e problemas técnicos",
+  work: "trabalho e demandas profissionais",
+  study: "estudos e educação",
+  relationships: "relacionamentos sentimentais",
+  food: "comida e refeições",
+  media: "filmes, séries e mídia",
+  finances: "finanças, bancos e dinheiro",
+  health: "saúde e bem-estar"
+};
+class TopicClassifier {
+  constructor() {
+    __publicField(this, "centroids", /* @__PURE__ */ new Map());
+  }
+  async init() {
+    console.log("[TopicClassifier] Initializing general zero-shot probes...");
+    const embedder = EmbeddingService.getInstance();
+    for (const [topic, probes] of Object.entries(TOPIC_PROBES)) {
+      const vectors = await embedder.embedBatch(probes);
+      const centroid = this.averageVectors(vectors);
+      this.centroids.set(topic, centroid);
+    }
+    console.log("[TopicClassifier] Initialized", this.centroids.size, "topics");
+  }
+  classify(chunkEmbedding) {
+    let best = { topic: "", score: -1 };
+    for (const [topic, centroid] of this.centroids.entries()) {
+      const sim = this.cosineSimilarity(chunkEmbedding, centroid);
+      if (sim > best.score) {
+        best = { topic, score: sim };
+      }
+    }
+    return best.score >= 0.35 ? best : null;
+  }
+  averageVectors(vectors) {
+    if (!vectors.length) return new Float32Array(384);
+    const dim = vectors[0].length;
+    const centroid = new Float32Array(dim);
+    for (const v of vectors) {
+      for (let i = 0; i < dim; i++) {
+        centroid[i] += v[i];
+      }
+    }
+    for (let i = 0; i < dim; i++) {
+      centroid[i] /= vectors.length;
+    }
+    let norm = 0;
+    for (let i = 0; i < dim; i++) {
+      norm += centroid[i] * centroid[i];
+    }
+    norm = Math.sqrt(norm);
+    if (norm > 0) {
+      for (let i = 0; i < dim; i++) {
+        centroid[i] /= norm;
+      }
+    }
+    return centroid;
+  }
+  cosineSimilarity(a, b) {
+    let dotProduct = 0;
+    let aMagnitude = 0;
+    let bMagnitude = 0;
+    for (let i = 0; i < a.length; i++) {
+      dotProduct += a[i] * b[i];
+      aMagnitude += a[i] * a[i];
+      bMagnitude += b[i] * b[i];
+    }
+    if (aMagnitude === 0 || bMagnitude === 0) return 0;
+    return dotProduct / (Math.sqrt(aMagnitude) * Math.sqrt(bMagnitude));
+  }
+}
+function buildProfileFacts(contactName, contactId, termStats, topicCounts, totalChunks) {
+  const facts = [];
+  const topTerms = termStats.slice(0, 20);
+  for (const term of topTerms) {
+    const topSender = Object.entries(term.countBySender).sort((a, b) => b[1] - a[1])[0];
+    const firstSeenDate = new Date(term.firstSeen * 1e3).toLocaleDateString("pt-BR");
+    const lastSeenDate = new Date(term.lastSeen * 1e3).toLocaleDateString("pt-BR");
+    facts.push({
+      contact_id: contactId,
+      text: `O assunto ou termo "${term.term}" é mencionado frequentemente na conversa com ${contactName}. Apareceu ${term.totalCount} vezes. ${topSender[0]} é quem mais fala sobre "${term.term}" (${topSender[1]} vezes). Período de citação: ${firstSeenDate} a ${lastSeenDate}. Exemplo na conversa: ${term.sampleMessages[0]}`,
+      evidence: term.totalCount,
+      category: "frequent_term"
+    });
+  }
+  for (const [topic, count] of topicCounts.entries()) {
+    if (count < 2) continue;
+    const pct = (count / totalChunks * 100).toFixed(0);
+    const label = TOPIC_LABELS[topic];
+    facts.push({
+      contact_id: contactId,
+      text: `${contactName} e o usuário conversam ativamente sobre ${label}. Este assunto apareceu em aproximadamente ${pct}% das conversas (${count} de ${totalChunks} agrupamentos).`,
+      evidence: count,
+      category: "topic"
+    });
+  }
+  const coOccurrences = findCoOccurrences(termStats);
+  for (const co of coOccurrences.slice(0, 5)) {
+    facts.push({
+      contact_id: contactId,
+      text: `"${co.termA}" e "${co.termB}" são assuntos que aparecem juntos frequentemente na conversa com ${contactName}. Isso ocorreu ${co.count} vezes diferentes em períodos similares.`,
+      evidence: co.count,
+      category: "co_occurrence"
+    });
+  }
+  return facts;
+}
+function findCoOccurrences(termStats) {
+  const pairs = [];
+  const candidateTerms = termStats.slice(0, 15);
+  for (let i = 0; i < candidateTerms.length; i++) {
+    for (let j = i + 1; j < candidateTerms.length; j++) {
+      const a = candidateTerms[i];
+      const b = candidateTerms[j];
+      let overlapCount = 0;
+      for (const msgA of a.sampleMessages) {
+        for (const msgB of b.sampleMessages) {
+          if (msgA === msgB) overlapCount++;
+        }
+      }
+      if (overlapCount > 0 && !a.term.includes(b.term) && !b.term.includes(a.term)) {
+        pairs.push({ termA: a.term, termB: b.term, count: overlapCount });
+      }
+    }
+  }
+  return pairs.sort((a, b) => b.count - a.count);
+}
+class ProfileFactRepository {
+  constructor(db) {
+    this.db = db;
+  }
+  /**
+   * Insert a batch of ProfileFacts into the database.
+   */
+  insertBatch(facts) {
+    const stmt = this.db.prepare(`
+      INSERT INTO profile_facts (id, contact_id, category, text, evidence)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    this.db.transaction((items) => {
+      for (const item of items) {
+        stmt.run(item.id, item.contact_id, item.category, item.text, item.evidence);
+      }
+    })(facts);
+  }
+  /**
+   * Delete all profile facts for a specific chat.
+   */
+  deleteByChatId(chatId) {
+    this.db.prepare("DELETE FROM profile_facts WHERE contact_id = ?").run(chatId);
+  }
+  /**
+   * Retrieve all profile facts for a specific chat, ordered by highest evidence.
+   */
+  findByChatId(chatId) {
+    return this.db.prepare(`
+      SELECT * FROM profile_facts 
+      WHERE contact_id = ? 
+      ORDER BY evidence DESC
+    `).all(chatId);
+  }
+}
 class ChatImportService {
   constructor() {
     __publicField(this, "parser", new WhatsAppParser());
@@ -1533,7 +1950,41 @@ class ChatImportService {
           detail: `${processed} / ${newChunks.length} chunks`
         });
       }
-      emit({ stage: "storing", percent: 85, label: "Salvando no banco", detail: "Persistindo dados da importação..." });
+      emit({ stage: "embedding", percent: 85, label: "Analisando perfil", detail: "Calculando N-grams e identificando tópicos..." });
+      const newMessages = parseResult.messages.map((m) => ({
+        id: nanoid(),
+        chat_id: chatId,
+        sender: m.sender,
+        content: m.content,
+        timestamp: m.timestamp,
+        type: m.type,
+        raw: m.raw
+      }));
+      const termStats = computeTermStats(newMessages);
+      const topicClassifier = new TopicClassifier();
+      await topicClassifier.init();
+      const topicCounts = /* @__PURE__ */ new Map();
+      for (const { embedding } of vectorsToInsert) {
+        const result = topicClassifier.classify(embedding);
+        if (result) {
+          topicCounts.set(result.topic, (topicCounts.get(result.topic) || 0) + 1);
+        }
+      }
+      emit({ stage: "embedding", percent: 86, label: "Analisando perfil", detail: "Gerando Profile Facts (memórias sintéticas)..." });
+      const rawFacts = buildProfileFacts(chatName, chatId, termStats, topicCounts, newChunks.length);
+      const factsToInsert = [];
+      const factVectorsToInsert = [];
+      for (let i = 0; i < rawFacts.length; i += BATCH_SIZE) {
+        const batch = rawFacts.slice(i, i + BATCH_SIZE);
+        const texts = batch.map((f) => f.text);
+        const embeddings = await embeddingService.embedBatch(texts);
+        for (let j = 0; j < batch.length; j++) {
+          const factId = nanoid();
+          factsToInsert.push({ ...batch[j], id: factId });
+          factVectorsToInsert.push({ factId, embedding: embeddings[j] });
+        }
+      }
+      emit({ stage: "storing", percent: 88, label: "Salvando no banco", detail: "Persistindo dados da importação..." });
       chatRepo.create({
         id: chatId,
         name: chatName,
@@ -1545,22 +1996,16 @@ class ChatImportService {
         last_message_at: parseResult.stats.lastTimestamp ?? void 0
       });
       const messageRepo = new MessageRepository(db);
-      const newMessages = parseResult.messages.map((m) => ({
-        id: nanoid(),
-        chat_id: chatId,
-        sender: m.sender,
-        content: m.content,
-        timestamp: m.timestamp,
-        type: m.type,
-        raw: m.raw
-      }));
       messageRepo.insertBatch(newMessages);
       emit({ stage: "storing", percent: 90, label: "Salvando no banco", detail: "Indexando chunks no FTS5..." });
       const chunkRepo = new ChunkRepository(db);
       chunkRepo.insertBatch(newChunks);
-      emit({ stage: "storing", percent: 95, label: "Salvando no banco", detail: "Inserindo vetores semânticos no sqlite-vec..." });
+      emit({ stage: "storing", percent: 95, label: "Salvando no banco", detail: "Inserindo vetores e fatos de perfil..." });
       const vectorRepo = new VectorRepository(db);
       vectorRepo.insertBatch(vectorsToInsert);
+      vectorRepo.insertFactBatch(factVectorsToInsert);
+      const profileFactRepo = new ProfileFactRepository(db);
+      profileFactRepo.insertBatch(factsToInsert);
       emit({ stage: "done", percent: 100, label: "Importação concluída", detail: `${parseResult.messages.length.toLocaleString("pt-BR")} mensagens indexadas` });
       return {
         success: true,
@@ -1634,10 +2079,12 @@ const _SearchService = class _SearchService {
     __publicField(this, "chatRepo");
     __publicField(this, "chunkRepo");
     __publicField(this, "vectorRepo");
+    __publicField(this, "factRepo");
     const db = DatabaseService.getInstance();
     this.chatRepo = new ChatRepository(db);
     this.chunkRepo = new ChunkRepository(db);
     this.vectorRepo = new VectorRepository(db);
+    this.factRepo = new ProfileFactRepository(db);
   }
   static getInstance() {
     if (!_SearchService.instance) {
@@ -1646,6 +2093,7 @@ const _SearchService = class _SearchService {
     return _SearchService.instance;
   }
   async search(query, options, precomputedEmbedding) {
+    var _a;
     const start = performance.now();
     const config = SettingsService.getInstance().get();
     const limit = (options == null ? void 0 : options.limit) || config.topK;
@@ -1667,49 +2115,129 @@ const _SearchService = class _SearchService {
       }
     }
     const searchStart = performance.now();
-    const ftsQuery = query.replace(/[^\p{L}\p{N}\s_]/gu, " ").replace(/\s+/g, " ").trim();
-    const vectorResults = isHybrid && ftsQuery.length > 0 ? this.vectorRepo.hybridSearch(queryEmbedding, ftsQuery, limit, alpha, chatId) : this.vectorRepo.search(queryEmbedding, limit, chatId);
-    const chunkIds = vectorResults.map((v) => v.chunk_id);
+    const STOPWORDS2 = /* @__PURE__ */ new Set([
+      "que",
+      "não",
+      "pra",
+      "com",
+      "uma",
+      "por",
+      "mas",
+      "como",
+      "mais",
+      "isso",
+      "esse",
+      "essa",
+      "tem",
+      "tá",
+      "vai",
+      "vou",
+      "foi",
+      "era",
+      "são",
+      "nos",
+      "das",
+      "dos",
+      "ele",
+      "ela",
+      "meu",
+      "sua",
+      "seu",
+      "pro",
+      "sim",
+      "qual",
+      "o",
+      "a",
+      "de",
+      "da",
+      "do"
+    ]);
+    const ftsQuery = query.toLowerCase().replace(/[^\p{L}\p{N}\s_]/gu, " ").split(/\s+/).filter((w) => w.length >= 2 && !STOPWORDS2.has(w)).join(" OR ");
+    const isPatternQuery = /sempre|frequente|geralmente|costume|toda hora|mais|quantas|padr/i.test(query);
+    let vectorResults = [];
+    let factVectorResults = [];
+    if (isHybrid && ftsQuery.length > 0) {
+      if (isPatternQuery) {
+        factVectorResults = this.vectorRepo.hybridSearchFacts(queryEmbedding, ftsQuery, Math.max(limit, 5), alpha, chatId);
+        vectorResults = this.vectorRepo.hybridSearch(queryEmbedding, ftsQuery, limit, alpha, chatId);
+      } else {
+        factVectorResults = this.vectorRepo.hybridSearchFacts(queryEmbedding, ftsQuery, 3, alpha, chatId);
+        vectorResults = this.vectorRepo.hybridSearch(queryEmbedding, ftsQuery, limit, alpha, chatId);
+      }
+    } else {
+      vectorResults = this.vectorRepo.search(queryEmbedding, limit, chatId);
+    }
+    const combinedScores = /* @__PURE__ */ new Map();
+    const K = 60;
+    vectorResults.forEach((r, i) => {
+      combinedScores.set(`chunk-${r.chunk_id}`, { id: r.chunk_id, type: "chunk", score: 1 / (K + i + 1) });
+    });
+    factVectorResults.forEach((r, i) => {
+      const key = `fact-${r.chunk_id}`;
+      const existing = combinedScores.get(key);
+      if (existing) {
+        existing.score += 1 / (K + i + 1);
+      } else {
+        combinedScores.set(key, { id: r.chunk_id, type: "fact", score: 1 / (K + i + 1) });
+      }
+    });
+    const sortedMerged = [...combinedScores.values()].sort((a, b) => b.score - a.score).slice(0, limit);
+    const chunkIds = sortedMerged.filter((s) => s.type === "chunk").map((s) => s.id);
     const chunks = this.chunkRepo.findByIds(chunkIds);
     const chunkMap = new Map(chunks.map((c) => [c.id, c]));
+    const factIds = sortedMerged.filter((s) => s.type === "fact").map((s) => s.id);
+    const allFacts = factIds.length > 0 ? this.factRepo.findByChatId(chatId || ((_a = chunks[0]) == null ? void 0 : _a.chat_id) || "") : [];
+    const factMap = new Map(allFacts.map((f) => [f.id, f]));
     const chatMap = /* @__PURE__ */ new Map();
     const finalResults = [];
-    for (const vRes of vectorResults) {
-      const chunk = chunkMap.get(vRes.chunk_id);
-      if (!chunk) continue;
-      let chatName = chatMap.get(chunk.chat_id);
-      if (!chatName) {
-        const chat = this.chatRepo.findById(chunk.chat_id);
-        chatName = chat ? chat.name : "Unknown Chat";
-        chatMap.set(chunk.chat_id, chatName);
-      }
-      const date = new Date(chunk.start_time * 1e3);
-      const formattedDate = new Intl.DateTimeFormat("pt-BR", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit"
-      }).format(date).replace(",", "");
-      let similarityScore = 0;
-      if (isHybrid) {
-        const rrfScore = 1 - vRes.distance;
-        const maxRrfScore = 1 / 61;
-        similarityScore = Math.min(1, rrfScore / maxRrfScore);
+    const getChatName = (cId) => {
+      if (chatMap.has(cId)) return chatMap.get(cId);
+      const chat = this.chatRepo.findById(cId);
+      const name = chat ? chat.name : "Unknown Chat";
+      chatMap.set(cId, name);
+      return name;
+    };
+    for (const res of sortedMerged) {
+      if (res.type === "chunk") {
+        const chunk = chunkMap.get(res.id);
+        if (!chunk) continue;
+        const chatName = getChatName(chunk.chat_id);
+        const date = new Date(chunk.start_time * 1e3);
+        const formattedDate = new Intl.DateTimeFormat("pt-BR", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit"
+        }).format(date).replace(",", "");
+        finalResults.push({
+          id: `chunk-${chunk.id}`,
+          chatId: chunk.chat_id,
+          chatName,
+          score: Math.min(1, res.score * 10),
+          // Boost RRF visual score
+          content: chunk.display_content,
+          date: formattedDate,
+          sender: chunk.participants.length > 0 ? chunk.participants[0] : "Unknown",
+          chunkId: chunk.id
+        });
       } else {
-        const cosineDist = vRes.distance * vRes.distance / 2;
-        similarityScore = Math.max(0, 1 - cosineDist);
+        const fact = factMap.get(res.id);
+        if (!fact) continue;
+        const chatName = getChatName(fact.contact_id);
+        finalResults.push({
+          id: `fact-${fact.id}`,
+          chatId: fact.contact_id,
+          chatName,
+          score: Math.min(1, res.score * 10),
+          // Boost RRF visual score
+          content: `📊 *Fato de Perfil*
+${fact.text}`,
+          date: "Análise Estatística",
+          sender: "🤖 Sistema",
+          chunkId: fact.id
+        });
       }
-      finalResults.push({
-        id: `res-${vRes.chunk_id}`,
-        chatId: chunk.chat_id,
-        chatName,
-        score: similarityScore,
-        content: chunk.display_content,
-        date: formattedDate,
-        sender: chunk.participants.length > 0 ? chunk.participants[0] : "Unknown",
-        chunkId: vRes.chunk_id
-      });
     }
     const end = performance.now();
     console.log(`[SearchService] Search complete in ${Math.round(end - start)}ms (DB: ${Math.round(end - searchStart)}ms). Found ${finalResults.length} results.`);
@@ -1880,16 +2408,13 @@ const LLMService$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.define
 const promptTemplates = {
   buildRAGPrompt: (question, chunks) => {
     const formattedChunks = chunks.map((c) => `[${c.date} - ${c.sender}]: ${c.content}`).join("\n\n");
-    const systemPrompt = `Você é um assistente encarregado de ler históricos de chat. Responda apenas com o que estiver no contexto.`;
-    const userPrompt = `Contexto das mensagens (Lido do Banco de Dados):
+    const systemPrompt = `Você é um assistente que responde perguntas sobre históricos de conversa. Baseie sua resposta apenas no contexto fornecido.`;
+    const userPrompt = `Contexto das mensagens:
 ${formattedChunks}
 
-Pergunta do usuário: ${question}
+Pergunta: ${question}
 
-Instruções finais:
-1. Revise se o contexto nomeia os jogos.
-2. Se NÃO houver jogos listados no contexto, responda: "O contexto não tem certeza do jogo procurado".
-3. NÃO sugira jogos (como Minecraft, Among Us, etc) se não estiverem no contexto acima.`;
+Responda de forma direta com base apenas no contexto acima.`;
     return { systemPrompt, userPrompt };
   }
 };

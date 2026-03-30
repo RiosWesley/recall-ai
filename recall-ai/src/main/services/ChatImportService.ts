@@ -23,6 +23,9 @@ import { WhatsAppParser } from '../core/parser/WhatsAppParser'
 import { ChunkingEngine } from '../core/chunking/ChunkingEngine'
 import { ModelManager } from './ModelManager'
 import { EmbeddingService } from './EmbeddingService'
+import { computeTermStats, TopicClassifier } from './import/StatsGenerator'
+import { buildProfileFacts } from './import/ProfileFactsBuilder'
+import { ProfileFactRepository } from '../db/repositories/ProfileFactRepository'
 
 import type { ImportProgress, ImportResult } from '../../shared/types'
 import type { NewMessage, NewChunk } from '../../shared/types'
@@ -141,8 +144,54 @@ export class ChatImportService {
         })
       }
 
+      // ── Stage 4.5: Profile Facts ──────────────────────────────────────────
+      emit({ stage: 'embedding', percent: 85, label: 'Analisando perfil', detail: 'Calculando N-grams e identificando tópicos...' })
+      
+      const newMessages: NewMessage[] = parseResult.messages.map((m) => ({
+        id: nanoid(),
+        chat_id: chatId,
+        sender: m.sender,
+        content: m.content,
+        timestamp: m.timestamp,
+        type: m.type,
+        raw: m.raw,
+      }))
+
+      const termStats = computeTermStats(newMessages)
+      
+      const topicClassifier = new TopicClassifier()
+      await topicClassifier.init()
+
+      const topicCounts = new Map<string, number>()
+      for (const { embedding } of vectorsToInsert) {
+        const result = topicClassifier.classify(embedding)
+        if (result) {
+          topicCounts.set(result.topic, (topicCounts.get(result.topic) || 0) + 1)
+        }
+      }
+
+      emit({ stage: 'embedding', percent: 86, label: 'Analisando perfil', detail: 'Gerando Profile Facts (memórias sintéticas)...' })
+      const rawFacts = buildProfileFacts(chatName, chatId, termStats, topicCounts, newChunks.length)
+      
+      // We also need to embed these profile facts
+      const factsToInsert: any[] = []
+      const factVectorsToInsert: { factId: string; embedding: Float32Array }[] = []
+
+      for (let i = 0; i < rawFacts.length; i += BATCH_SIZE) {
+        const batch = rawFacts.slice(i, i + BATCH_SIZE)
+        const texts = batch.map(f => f.text)
+        
+        const embeddings = await embeddingService.embedBatch(texts)
+        
+        for (let j = 0; j < batch.length; j++) {
+          const factId = nanoid()
+          factsToInsert.push({ ...batch[j], id: factId })
+          factVectorsToInsert.push({ factId, embedding: embeddings[j] })
+        }
+      }
+
       // ── Stage 5: Storing ──────────────────────────────────────────────────
-      emit({ stage: 'storing', percent: 85, label: 'Salvando no banco', detail: 'Persistindo dados da importação...' })
+      emit({ stage: 'storing', percent: 88, label: 'Salvando no banco', detail: 'Persistindo dados da importação...' })
 
       chatRepo.create({
         id: chatId,
@@ -156,24 +205,19 @@ export class ChatImportService {
       })
 
       const messageRepo = new MessageRepository(db)
-      const newMessages: NewMessage[] = parseResult.messages.map((m) => ({
-        id: nanoid(),
-        chat_id: chatId,
-        sender: m.sender,
-        content: m.content,
-        timestamp: m.timestamp,
-        type: m.type,
-        raw: m.raw,
-      }))
       messageRepo.insertBatch(newMessages)
 
       emit({ stage: 'storing', percent: 90, label: 'Salvando no banco', detail: 'Indexando chunks no FTS5...' })
       const chunkRepo = new ChunkRepository(db)
       chunkRepo.insertBatch(newChunks)
 
-      emit({ stage: 'storing', percent: 95, label: 'Salvando no banco', detail: 'Inserindo vetores semânticos no sqlite-vec...' })
+      emit({ stage: 'storing', percent: 95, label: 'Salvando no banco', detail: 'Inserindo vetores e fatos de perfil...' })
       const vectorRepo = new VectorRepository(db)
       vectorRepo.insertBatch(vectorsToInsert)
+      vectorRepo.insertFactBatch(factVectorsToInsert)
+
+      const profileFactRepo = new ProfileFactRepository(db)
+      profileFactRepo.insertBatch(factsToInsert)
 
       emit({ stage: 'done', percent: 100, label: 'Importação concluída', detail: `${parseResult.messages.length.toLocaleString('pt-BR')} mensagens indexadas` })
 

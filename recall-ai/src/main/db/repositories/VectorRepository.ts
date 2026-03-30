@@ -54,6 +54,28 @@ export class VectorRepository {
   }
 
   /**
+   * Store multiple facts' embeddings in a single transaction.
+   * @param items - Array of { factId, embedding }
+   */
+  insertFactBatch(items: { factId: string; embedding: Float32Array }[]): void {
+    if (!this.isAvailable) {
+      console.warn('[VectorRepository] sqlite-vec not available — skipping fact batch insert')
+      return
+    }
+
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO profile_facts_vectors (fact_id, embedding)
+      VALUES (?, ?)
+    `)
+
+    this.db.transaction((vectors: { factId: string; embedding: Float32Array }[]) => {
+      for (const item of vectors) {
+        stmt.run(item.factId, Buffer.from(item.embedding.buffer))
+      }
+    })(items)
+  }
+
+  /**
    * Perform a KNN search for the closest chunks to a query embedding.
    * @param queryEmbedding - Float32Array of length 384
    * @param topK - Number of results to return
@@ -105,31 +127,83 @@ export class VectorRepository {
     alpha = 0.7,
     chatId?: string
   ): VectorResult[] {
+    return this._hybridSearchCore(
+      'chunks', 
+      'chunk_id', 
+      'vectors', 
+      'chunks_fts', 
+      queryEmbedding, 
+      queryText, 
+      topK, 
+      alpha, 
+      chatId, 
+      'chat_id',
+      'content'
+    )
+  }
+
+  /**
+   * Hybrid search optimized for Profile Facts.
+   */
+  hybridSearchFacts(
+    queryEmbedding: Float32Array,
+    queryText: string,
+    topK = 10,
+    alpha = 0.7,
+    chatId?: string
+  ): VectorResult[] {
+    return this._hybridSearchCore(
+      'profile_facts', 
+      'fact_id', 
+      'profile_facts_vectors', 
+      'profile_facts_fts', 
+      queryEmbedding, 
+      queryText, 
+      topK, 
+      alpha, 
+      chatId, 
+      'contact_id',
+      'text'
+    )
+  }
+
+  private _hybridSearchCore(
+    baseTable: string,
+    idColumn: string,
+    vecTable: string,
+    ftsTable: string,
+    queryEmbedding: Float32Array,
+    queryText: string,
+    topK: number,
+    alpha: number,
+    chatId?: string,
+    chatIdColumn = 'chat_id',
+    ftsContentColumn = 'content'
+  ): VectorResult[] {
     if (!this.isAvailable) {
       // Fallback to FTS5 only
-      return this.ftsOnly(queryText, topK, chatId)
+      return this.ftsOnly(queryText, topK, chatId, ftsTable, baseTable, idColumn, chatIdColumn)
     }
 
     const buffer = Buffer.from(queryEmbedding.buffer)
     const beta = 1 - alpha
-    // We fetch a bit more than topK internally to improve RRF overlap quality
     const fetchCount = topK * 5
 
-    const semTable = chatId ? 'vectors v JOIN chunks c ON c.id = v.chunk_id' : 'vectors v'
-    const semWhere = chatId ? 'v.embedding MATCH ? AND v.k = ? AND c.chat_id = ?' : 'v.embedding MATCH ? AND v.k = ?'
+    const semTable = chatId ? `${vecTable} v JOIN ${baseTable} c ON c.id = v.${idColumn}` : `${vecTable} v`
+    const semWhere = chatId ? `v.embedding MATCH ? AND v.k = ? AND c.${chatIdColumn} = ?` : `v.embedding MATCH ? AND v.k = ?`
     
-    const kwTable = chatId ? 'chunks_fts f JOIN chunks c ON c.id = f.chunk_id' : 'chunks_fts f'
-    const kwWhere = chatId ? 'f.content MATCH ? AND c.chat_id = ?' : 'f.content MATCH ?'
+    const kwTable = chatId ? `${ftsTable} f JOIN ${baseTable} c ON c.id = f.${idColumn}` : `${ftsTable} f`
+    const kwWhere = chatId ? `f.${ftsContentColumn} MATCH ? AND c.${chatIdColumn} = ?` : `f.${ftsContentColumn} MATCH ?`
 
     const sql = `
       WITH semantic AS (
-        SELECT v.chunk_id, v.distance as sem_dist,
+        SELECT v.${idColumn} as record_id, v.distance as sem_dist,
                row_number() OVER (ORDER BY v.distance ASC) as sem_rank
         FROM ${semTable}
         WHERE ${semWhere}
       ),
       keyword AS (
-        SELECT f.chunk_id, f.rank as kw_score,
+        SELECT f.${idColumn} as record_id, f.rank as kw_score,
                row_number() OVER (ORDER BY f.rank ASC) as kw_rank
         FROM ${kwTable}
         WHERE ${kwWhere}
@@ -137,38 +211,26 @@ export class VectorRepository {
       ),
       combined AS (
         SELECT
-          COALESCE(s.chunk_id, k.chunk_id) AS chunk_id,
+          COALESCE(s.record_id, k.record_id) AS record_id,
           (? * COALESCE(1.0 / (60.0 + s.sem_rank), 0.0))
           + (? * COALESCE(1.0 / (60.0 + k.kw_rank), 0.0)) AS score
         FROM semantic s
-        FULL OUTER JOIN keyword k ON s.chunk_id = k.chunk_id
+        FULL OUTER JOIN keyword k ON s.record_id = k.record_id
       )
-      SELECT chunk_id, (1.0 - score) AS distance
+      SELECT record_id as chunk_id, (1.0 - score) AS distance
       FROM combined
       ORDER BY score DESC
       LIMIT ?
     `
 
     const params: any[] = []
-    
-    // Semantic params
-    params.push(buffer)
-    params.push(fetchCount) // For v.k = ?
+    params.push(buffer, fetchCount)
     if (chatId) params.push(chatId)
-    
-    // Keyword params
     params.push(queryText)
     if (chatId) params.push(chatId)
-    params.push(fetchCount)
-    
-    // RRF params
-    params.push(alpha)
-    params.push(beta)
-    params.push(topK)
+    params.push(fetchCount, alpha, beta, topK)
 
-    const rows = this.db.prepare(sql).all(...params) as VectorResult[]
-
-    return rows
+    return this.db.prepare(sql).all(...params) as VectorResult[]
   }
 
   /**
@@ -222,26 +284,36 @@ export class VectorRepository {
   }
 
   /** Pure FTS5 fallback when sqlite-vec is unavailable. */
-  private ftsOnly(queryText: string, topK: number, chatId?: string): VectorResult[] {
+  private ftsOnly(
+    queryText: string, 
+    topK: number, 
+    chatId?: string,
+    ftsTable = 'chunks_fts',
+    baseTable = 'chunks',
+    idColumn = 'chunk_id',
+    chatIdColumn = 'chat_id'
+  ): VectorResult[] {
     try {
-      let sql = 'SELECT f.chunk_id, f.rank as distance FROM chunks_fts f'
+      let sql = `SELECT f.${idColumn} as chunk_id, f.rank as distance FROM ${ftsTable} f`
       const params: any[] = []
 
+      // Support old 'content' vs new 'text' col
+      const contentCol = ftsTable === 'chunks_fts' ? 'content' : 'text'
+
       if (chatId) {
-        sql += ' JOIN chunks c ON c.id = f.chunk_id WHERE f.content MATCH ? AND c.chat_id = ?'
+        sql += ` JOIN ${baseTable} c ON c.id = f.${idColumn} WHERE f.${contentCol} MATCH ? AND c.${chatIdColumn} = ?`
         params.push(queryText, chatId)
       } else {
-        sql += ' WHERE f.content MATCH ?'
+        sql += ` WHERE f.${contentCol} MATCH ?`
         params.push(queryText)
       }
 
-      sql += ' ORDER BY f.rank LIMIT ?'
+      sql += ` ORDER BY f.rank LIMIT ?`
       params.push(topK)
 
-      const rows = this.db.prepare(sql).all(...params) as VectorResult[]
-
-      return rows
-    } catch {
+      return this.db.prepare(sql).all(...params) as VectorResult[]
+    } catch (err) {
+      console.warn('[VectorRepository] ftsOnly failed:', err)
       return []
     }
   }

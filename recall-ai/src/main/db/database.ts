@@ -3,6 +3,7 @@ import { app } from 'electron'
 import path from 'node:path'
 
 import { runMigrations } from './migrations/001_initial'
+import { runMigration002 } from './migrations/002_add_profile_facts'
 import * as sqliteVec from 'sqlite-vec'
 let instance: Database.Database | null = null
 
@@ -42,6 +43,7 @@ export class DatabaseService {
 
     // Run migrations
     runMigrations(db)
+    runMigration002(db)
 
     console.log('[DB] Database ready')
 

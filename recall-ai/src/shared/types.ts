@@ -88,6 +88,18 @@ export interface VectorResult {
   distance: number
 }
 
+// ─── PROFILE FACT ─────────────────────────────────────────────────────────────
+
+export type FactCategory = 'frequent_term' | 'topic' | 'dynamics' | 'co_occurrence'
+
+export interface ProfileFact {
+  id?: string
+  contact_id: string
+  category: FactCategory
+  text: string
+  evidence: number
+}
+
 // ─── SEARCH ──────────────────────────────────────────────────────────────────
 
 export interface SearchOptions {
