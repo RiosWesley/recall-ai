@@ -9,6 +9,7 @@ import { registerImportHandlers } from './importHandlers'
 import { registerModelHandlers } from './modelHandlers'
 import { registerSearchHandlers } from './searchHandlers'
 import { registerRagHandlers } from './ragHandlers'
+import { registerSettingsHandlers } from './settingsHandlers'
 
 export function registerAllHandlers(win: BrowserWindow) {
   registerChatHandlers()
@@ -16,4 +17,5 @@ export function registerAllHandlers(win: BrowserWindow) {
   registerModelHandlers(win)
   registerSearchHandlers()
   registerRagHandlers(win)
+  registerSettingsHandlers()
 }

@@ -32,6 +32,9 @@ electron.contextBridge.exposeInMainWorld("api", {
     electron.ipcRenderer.on("models:progress", listener);
     return () => electron.ipcRenderer.off("models:progress", listener);
   },
+  selectModelFile() {
+    return electron.ipcRenderer.invoke("models:select-file");
+  },
   // ── Search ──────────────────────────────────────────────────────────────────
   search(query, options) {
     return electron.ipcRenderer.invoke("search:query", query, options);
@@ -49,6 +52,13 @@ electron.contextBridge.exposeInMainWorld("api", {
     const listener = (_event, response) => cb(response);
     electron.ipcRenderer.on("rag:done", listener);
     return () => electron.ipcRenderer.off("rag:done", listener);
+  },
+  // ── Settings ────────────────────────────────────────────────────────────────
+  getSettings() {
+    return electron.ipcRenderer.invoke("settings:get");
+  },
+  updateSettings(partial) {
+    return electron.ipcRenderer.invoke("settings:update", partial);
   },
   // ── Window controls ─────────────────────────────────────────────────────────
   windowMinimize() {

@@ -10,6 +10,8 @@ import { webcrypto, createHash } from "node:crypto";
 import fs, { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { resolveModelFile, createModelDownloader, getLlama } from "node-llama-cpp";
+import fs$1 from "fs";
+import path$1 from "path";
 const MIGRATION_ID = "001_initial";
 const SCHEMA_SQL = `
   -- ============================================================
@@ -1227,6 +1229,88 @@ async function detectGpu() {
     backend
   };
 }
+const DEFAULT_SETTINGS = {
+  gpu: "auto",
+  temperature: 0.3,
+  systemPrompt: "Você é um assistente encarregado de ler históricos de chat. Responda apenas com o que estiver no contexto.",
+  topK: 5,
+  alpha: 0.7,
+  history: true,
+  analytics: false,
+  customLlmPath: null,
+  customEmbeddingPath: null
+};
+const _SettingsService = class _SettingsService {
+  constructor() {
+    __publicField(this, "settingsPath");
+    __publicField(this, "currentSettings");
+    const userData = app.getPath("userData");
+    this.settingsPath = path$1.join(userData, "settings.json");
+    this.currentSettings = { ...DEFAULT_SETTINGS };
+    this.load();
+  }
+  static getInstance() {
+    if (!_SettingsService.instance) {
+      _SettingsService.instance = new _SettingsService();
+    }
+    return _SettingsService.instance;
+  }
+  get() {
+    return { ...this.currentSettings };
+  }
+  update(partial) {
+    const hasGpuChanged = partial.gpu !== void 0 && partial.gpu !== this.currentSettings.gpu;
+    const hasLlmChanged = "customLlmPath" in partial && partial.customLlmPath !== this.currentSettings.customLlmPath;
+    const hasEmbChanged = "customEmbeddingPath" in partial && partial.customEmbeddingPath !== this.currentSettings.customEmbeddingPath;
+    this.currentSettings = {
+      ...this.currentSettings,
+      ...partial
+    };
+    this.save();
+    if (hasGpuChanged || hasLlmChanged || hasEmbChanged) {
+      setTimeout(async () => {
+        console.log("[SettingsService] Critical backend setting changed. Disposing active models for cold-restart.");
+        const { LLMService: LLMService2 } = await Promise.resolve().then(() => LLMService$1);
+        const { EmbeddingService: EmbeddingService2 } = await Promise.resolve().then(() => EmbeddingService$1);
+        try {
+          LLMService2.getInstance().dispose();
+        } catch (e) {
+        }
+        try {
+          EmbeddingService2.getInstance().dispose();
+        } catch (e) {
+        }
+      }, 0);
+    }
+    return this.get();
+  }
+  load() {
+    try {
+      if (fs$1.existsSync(this.settingsPath)) {
+        const data = fs$1.readFileSync(this.settingsPath, "utf-8");
+        const parsed = JSON.parse(data);
+        this.currentSettings = {
+          ...DEFAULT_SETTINGS,
+          ...parsed
+        };
+      } else {
+        this.save();
+      }
+    } catch (error) {
+      console.error("[SettingsService] Failed to load settings:", error);
+      this.currentSettings = { ...DEFAULT_SETTINGS };
+    }
+  }
+  save() {
+    try {
+      fs$1.writeFileSync(this.settingsPath, JSON.stringify(this.currentSettings, null, 2));
+    } catch (error) {
+      console.error("[SettingsService] Failed to save settings:", error);
+    }
+  }
+};
+__publicField(_SettingsService, "instance");
+let SettingsService = _SettingsService;
 const _EmbeddingService = class _EmbeddingService {
   constructor() {
     __publicField(this, "llama", null);
@@ -1257,7 +1341,8 @@ const _EmbeddingService = class _EmbeddingService {
         this.gpuAccelerated = gpuInfo.backend !== false;
         console.log(`[EmbeddingService] GPU Detected: ${gpuInfo.backend || "none"}`);
         console.log("[EmbeddingService] Resolving embedding model...");
-        const modelPath = await ModelManager.getInstance().resolve("embedding");
+        const customPath = SettingsService.getInstance().get().customEmbeddingPath;
+        let modelPath = customPath && fs.existsSync(customPath) ? customPath : await ModelManager.getInstance().resolve("embedding");
         this.model = await this.llama.loadModel({
           modelPath,
           // Since embeddings are fast, we can offload layers fully to GPU if available
@@ -1353,6 +1438,10 @@ const _EmbeddingService = class _EmbeddingService {
 };
 __publicField(_EmbeddingService, "instance", null);
 let EmbeddingService = _EmbeddingService;
+const EmbeddingService$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
+  EmbeddingService
+}, Symbol.toStringTag, { value: "Module" }));
 class ChatImportService {
   constructor() {
     __publicField(this, "parser", new WhatsAppParser());
@@ -1527,6 +1616,18 @@ function registerModelHandlers(win2) {
       }
     });
   });
+  ipcMain.handle("models:select-file", async () => {
+    const result = await dialog.showOpenDialog(win2, {
+      title: "Selecionar Modelo GGUF (BYOM)",
+      filters: [
+        { name: "GGUF Models", extensions: ["gguf"] },
+        { name: "Todos os arquivos", extensions: ["*"] }
+      ],
+      properties: ["openFile"]
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
+  });
 }
 const _SearchService = class _SearchService {
   constructor() {
@@ -1546,8 +1647,10 @@ const _SearchService = class _SearchService {
   }
   async search(query, options, precomputedEmbedding) {
     const start = performance.now();
-    const limit = (options == null ? void 0 : options.limit) || 10;
+    const config = SettingsService.getInstance().get();
+    const limit = (options == null ? void 0 : options.limit) || config.topK;
     const isHybrid = (options == null ? void 0 : options.hybrid) ?? true;
+    const alpha = config.alpha;
     const chatId = options == null ? void 0 : options.chatId;
     if (!query.trim()) return [];
     console.log(`[SearchService] Querying: "${query}" (hybrid: ${isHybrid}, chatId: ${chatId || "none"})`);
@@ -1565,7 +1668,7 @@ const _SearchService = class _SearchService {
     }
     const searchStart = performance.now();
     const ftsQuery = query.replace(/[^\p{L}\p{N}\s_]/gu, " ").replace(/\s+/g, " ").trim();
-    const vectorResults = isHybrid && ftsQuery.length > 0 ? this.vectorRepo.hybridSearch(queryEmbedding, ftsQuery, limit, 0.7, chatId) : this.vectorRepo.search(queryEmbedding, limit, chatId);
+    const vectorResults = isHybrid && ftsQuery.length > 0 ? this.vectorRepo.hybridSearch(queryEmbedding, ftsQuery, limit, alpha, chatId) : this.vectorRepo.search(queryEmbedding, limit, chatId);
     const chunkIds = vectorResults.map((v) => v.chunk_id);
     const chunks = this.chunkRepo.findByIds(chunkIds);
     const chunkMap = new Map(chunks.map((c) => [c.id, c]));
@@ -1645,7 +1748,8 @@ const _LLMService = class _LLMService {
     this.initializationPromise = new Promise(async (resolve, reject) => {
       try {
         console.log("[LLMService] Resolving LLM model path...");
-        const modelPath = await ModelManager.getInstance().resolve("llm");
+        const customPath = SettingsService.getInstance().get().customLlmPath;
+        let modelPath = customPath && fs.existsSync(customPath) ? customPath : await ModelManager.getInstance().resolve("llm");
         console.log("[LLMService] Forking Utility Process...");
         const workerPath = path.join(_dirname, "llm-worker.js");
         this.worker = utilityProcess.fork(workerPath, [], {
@@ -1769,6 +1873,10 @@ const _LLMService = class _LLMService {
 };
 __publicField(_LLMService, "instance", null);
 let LLMService = _LLMService;
+const LLMService$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
+  LLMService
+}, Symbol.toStringTag, { value: "Module" }));
 const promptTemplates = {
   buildRAGPrompt: (question, chunks) => {
     const formattedChunks = chunks.map((c) => `[${c.date} - ${c.sender}]: ${c.content}`).join("\n\n");
@@ -1811,7 +1919,8 @@ const _RAGService = class _RAGService {
       }
       const searchStart = performance.now();
       const searchService = SearchService.getInstance();
-      context = await searchService.search(question, { hybrid: true, limit: 5, chatId: options == null ? void 0 : options.chatId }, queryEmbedding);
+      const config = SettingsService.getInstance().get();
+      context = await searchService.search(question, { hybrid: true, limit: config.topK, chatId: options == null ? void 0 : options.chatId }, queryEmbedding);
       latency.search = performance.now() - searchStart;
       if (context.length === 0) {
         latency.total = performance.now() - totalStart;
@@ -1822,7 +1931,8 @@ const _RAGService = class _RAGService {
           latency
         };
       }
-      const { systemPrompt, userPrompt } = promptTemplates.buildRAGPrompt(question, context);
+      const { userPrompt } = promptTemplates.buildRAGPrompt(question, context);
+      const systemPrompt = config.systemPrompt;
       const generationStart = performance.now();
       const llmService = LLMService.getInstance();
       let answer = "";
@@ -1835,7 +1945,7 @@ const _RAGService = class _RAGService {
             if (onToken) onToken(token);
           },
           {
-            temperature: options == null ? void 0 : options.temperature,
+            temperature: (options == null ? void 0 : options.temperature) ?? config.temperature,
             maxTokens: (options == null ? void 0 : options.maxTokens) || 1024,
             systemPrompt
           }
@@ -1879,12 +1989,21 @@ function registerRagHandlers(win2) {
     }
   });
 }
+function registerSettingsHandlers() {
+  ipcMain.handle("settings:get", async () => {
+    return SettingsService.getInstance().get();
+  });
+  ipcMain.handle("settings:update", async (_event, partial) => {
+    return SettingsService.getInstance().update(partial);
+  });
+}
 function registerAllHandlers(win2) {
   registerChatHandlers();
   registerImportHandlers(win2);
   registerModelHandlers(win2);
   registerSearchHandlers();
   registerRagHandlers(win2);
+  registerSettingsHandlers();
 }
 const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
 process.env.APP_ROOT = path.join(__dirname$1, "..");

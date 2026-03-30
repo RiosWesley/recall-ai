@@ -3,6 +3,7 @@ import { SearchService } from './SearchService'
 import { LLMService } from './LLMService'
 import { promptTemplates } from './promptTemplates'
 import type { RAGOptions, RAGResponse, RAGLatency, SearchResult } from '../../shared/types'
+import { SettingsService } from './SettingsService'
 
 export class RAGService {
   private static instance: RAGService | null = null
@@ -42,7 +43,8 @@ export class RAGService {
       // 2. Search
       const searchStart = performance.now()
       const searchService = SearchService.getInstance()
-      context = await searchService.search(question, { hybrid: true, limit: 5, chatId: options?.chatId }, queryEmbedding)
+      const config = SettingsService.getInstance().get()
+      context = await searchService.search(question, { hybrid: true, limit: config.topK, chatId: options?.chatId }, queryEmbedding)
       latency.search = performance.now() - searchStart
 
       // 3. Early return if no context is found
@@ -57,7 +59,8 @@ export class RAGService {
       }
 
       // 4. Prompt Construction
-      const { systemPrompt, userPrompt } = promptTemplates.buildRAGPrompt(question, context)
+      const { userPrompt } = promptTemplates.buildRAGPrompt(question, context)
+      const systemPrompt = config.systemPrompt
 
       // 5. Generation
       const generationStart = performance.now()
@@ -74,7 +77,7 @@ export class RAGService {
             if (onToken) onToken(token)
           },
           {
-            temperature: options?.temperature,
+            temperature: options?.temperature ?? config.temperature,
             maxTokens: options?.maxTokens || 1024,
             systemPrompt: systemPrompt
           }

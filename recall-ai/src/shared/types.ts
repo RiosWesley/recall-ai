@@ -210,6 +210,7 @@ export interface RAGOptions {
   chatId?: string
   temperature?: number
   maxTokens?: number
+  systemPrompt?: string
 }
 
 export interface RAGResponse {
@@ -218,3 +219,18 @@ export interface RAGResponse {
   tokensUsed: number
   latency: RAGLatency
 }
+
+// ─── SETTINGS ────────────────────────────────────────────────────────────────
+
+export interface AppSettings {
+  gpu: string
+  temperature: number
+  systemPrompt: string
+  topK: number
+  alpha: number
+  history: boolean
+  analytics: boolean
+  customLlmPath: string | null
+  customEmbeddingPath: string | null
+}
+

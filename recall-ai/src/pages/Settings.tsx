@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Cpu, Sliders, HardDrive, Shield, Trash2, FolderOpen, ChevronRight } from 'lucide-react'
 
 interface SettingsSectionProps {
@@ -174,9 +174,68 @@ export default function SettingsPage() {
   const [topK, setTopK] = useState(5)
   const [alpha, setAlpha] = useState(0.7)
   const [temp, setTemp] = useState(0.3)
+  const [systemPrompt, setSystemPrompt] = useState('Você é um assistente encarregado de ler históricos de chat. Responda apenas com o que estiver no context.')
   const [history, setHistory] = useState(true)
   const [analytics, setAnalytics] = useState(false)
+  const [customLlmPath, setCustomLlmPath] = useState<string | null>(null)
+  const [customEmbeddingPath, setCustomEmbeddingPath] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
 
+  useEffect(() => {
+    window.api.getSettings().then(cfg => {
+      setGpu(cfg.gpu)
+      setTopK(cfg.topK)
+      setAlpha(cfg.alpha)
+      setTemp(cfg.temperature)
+      setSystemPrompt(cfg.systemPrompt || '')
+      setHistory(cfg.history)
+      setAnalytics(cfg.analytics)
+      setCustomLlmPath(cfg.customLlmPath || null)
+      setCustomEmbeddingPath(cfg.customEmbeddingPath || null)
+      setLoading(false)
+    }).catch(err => {
+      console.error('Failed to load settings', err)
+      setLoading(false)
+    })
+  }, [])
+
+  // Generic updater that sets local state instantly and syncs to backend
+  const updateConfig = <T,>(key: string, value: T, setter: (val: T) => void) => {
+    setter(value)
+    // Fire and forget update
+    window.api.updateSettings({ [key]: value }).catch(console.error)
+  }
+
+  // System Prompt uses a debounce for saving so it doesn't write to disk on every keystroke
+  const handleSystemPromptChange = (val: string) => {
+    setSystemPrompt(val)
+    // Basic debounce
+    setTimeout(() => {
+      window.api.updateSettings({ systemPrompt: val }).catch(console.error)
+    }, 1000)
+  }
+
+  const handleSwapModel = async (type: 'llm' | 'embedding') => {
+    try {
+      const path = await window.api.selectModelFile()
+      if (path) {
+        if (type === 'llm') updateConfig('customLlmPath', path, setCustomLlmPath)
+        else updateConfig('customEmbeddingPath', path, setCustomEmbeddingPath)
+      }
+    } catch (err) {
+      console.error('Failed to pick file:', err)
+    }
+  }
+
+  const handleClearModel = (type: 'llm' | 'embedding') => {
+    if (type === 'llm') updateConfig('customLlmPath', null, setCustomLlmPath)
+    else updateConfig('customEmbeddingPath', null, setCustomEmbeddingPath)
+  }
+
+  if (loading) return null
+
+  const displayLlmName = customLlmPath ? customLlmPath.split('\\').pop()?.split('/').pop() : 'Gemma 3 270M INT4 GGUF'
+  const displayEmbName = customEmbeddingPath ? customEmbeddingPath.split('\\').pop()?.split('/').pop() : 'nomic-embed-text-v1.5 GGUF'
 
   return (
     <div className="page">
@@ -195,7 +254,7 @@ export default function SettingsPage() {
           desc="Aceleração de hardware para inferência de IA"
           value={gpu}
           options={['auto', 'cuda', 'metal', 'vulkan', 'cpu']}
-          onChange={setGpu}
+          onChange={v => updateConfig('gpu', v, setGpu)}
         />
         <SliderRow
           label="Temperatura"
@@ -205,16 +264,49 @@ export default function SettingsPage() {
           max={1}
           step={0.05}
           format={v => v.toFixed(2)}
-          onChange={setTemp}
+          onChange={v => updateConfig('temperature', v, setTemp)}
         />
+        <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '10px' }}>
+          <div className="settings-row__info" style={{ width: '100%' }}>
+            <span className="settings-row__label">Instrução do Sistema (System Prompt)</span>
+            <span className="settings-row__desc" style={{ marginBottom: '8px', display: 'block' }}>
+              Define a "personalidade" base e as regras estruturais da Inteligência Artificial.
+            </span>
+            <textarea
+              className="chat-input selectable"
+              value={systemPrompt}
+              onChange={e => handleSystemPromptChange(e.target.value)}
+              style={{
+                width: '100%',
+                minHeight: '80px',
+                fontSize: '11px',
+                padding: '10px',
+                marginTop: '4px',
+                resize: 'vertical'
+              }}
+            />
+          </div>
+        </div>
         <div className="settings-row">
           <div className="settings-row__info">
             <span className="settings-row__label">Modelo LLM</span>
-            <span className="settings-row__desc">Gemma 3 270M INT4 GGUF · ~150MB</span>
+            <span className="settings-row__desc" title={customLlmPath || undefined}>
+              {displayLlmName} {customLlmPath ? '(Customizado)' : '· ~150MB'}
+            </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span className="badge badge--emerald">Carregado</span>
-            <button className="btn btn--ghost" style={{ fontSize: '11px', padding: '4px 8px', gap: '5px' }}>
+            <span className="badge badge--emerald">{customLlmPath ? 'B.Y.O.M.' : 'Oficial'}</span>
+            
+            {customLlmPath && (
+              <button 
+                className="btn btn--ghost" 
+                onClick={() => handleClearModel('llm')}
+                style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--danger)' }}>
+                Limpar
+              </button>
+            )}
+
+            <button className="btn btn--ghost" onClick={() => handleSwapModel('llm')} style={{ fontSize: '11px', padding: '4px 8px', gap: '5px' }}>
               <FolderOpen size={11} />
               Trocar
             </button>
@@ -223,9 +315,27 @@ export default function SettingsPage() {
         <div className="settings-row">
           <div className="settings-row__info">
             <span className="settings-row__label">Modelo de Embedding</span>
-            <span className="settings-row__desc">all-MiniLM-L6-v2 GGUF · ~25MB · dim 384</span>
+            <span className="settings-row__desc" title={customEmbeddingPath || undefined}>
+              {displayEmbName} {customEmbeddingPath ? '(Customizado)' : '· ~80MB · dim 768'}
+            </span>
           </div>
-          <span className="badge badge--emerald">Ativo</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span className="badge badge--emerald">{customEmbeddingPath ? 'B.Y.O.M.' : 'Oficial'}</span>
+            
+            {customEmbeddingPath && (
+              <button 
+                className="btn btn--ghost" 
+                onClick={() => handleClearModel('embedding')}
+                style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--danger)' }}>
+                Limpar
+              </button>
+            )}
+
+            <button className="btn btn--ghost" onClick={() => handleSwapModel('embedding')} style={{ fontSize: '11px', padding: '4px 8px', gap: '5px' }}>
+              <FolderOpen size={11} />
+              Trocar
+            </button>
+          </div>
         </div>
       </SettingsSection>
 
@@ -239,7 +349,7 @@ export default function SettingsPage() {
           max={20}
           step={1}
           format={v => String(v)}
-          onChange={setTopK}
+          onChange={v => updateConfig('topK', v, setTopK)}
         />
         <SliderRow
           label="Alpha (busca híbrida)"
@@ -249,13 +359,13 @@ export default function SettingsPage() {
           max={1}
           step={0.05}
           format={v => v.toFixed(2)}
-          onChange={setAlpha}
+          onChange={v => updateConfig('alpha', v, setAlpha)}
         />
         <ToggleRow
           label="Histórico de buscas"
           desc="Salvar consultas recentes na sidebar"
           value={history}
-          onChange={setHistory}
+          onChange={v => updateConfig('history', v, setHistory)}
         />
       </SettingsSection>
 
@@ -318,7 +428,7 @@ export default function SettingsPage() {
           label="Métricas de performance"
           desc="Coleta local de latência e uso de recursos (nunca enviado)"
           value={analytics}
-          onChange={setAnalytics}
+          onChange={v => updateConfig('analytics', v, setAnalytics)}
         />
         <div className="settings-row">
           <div className="settings-row__info">

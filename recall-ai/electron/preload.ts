@@ -50,6 +50,10 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.off('models:progress', listener)
   },
 
+  selectModelFile(): Promise<string | null> {
+    return ipcRenderer.invoke('models:select-file')
+  },
+
   // ── Search ──────────────────────────────────────────────────────────────────
   search(query: string, options?: SearchOptions): Promise<SearchResult[]> {
     return ipcRenderer.invoke('search:query', query, options)
@@ -70,6 +74,15 @@ contextBridge.exposeInMainWorld('api', {
     const listener = (_event: Electron.IpcRendererEvent, response: import('../src/shared/types').RAGResponse) => cb(response)
     ipcRenderer.on('rag:done', listener)
     return () => ipcRenderer.off('rag:done', listener)
+  },
+
+  // ── Settings ────────────────────────────────────────────────────────────────
+  getSettings(): Promise<import('../src/shared/types').AppSettings> {
+    return ipcRenderer.invoke('settings:get')
+  },
+
+  updateSettings(partial: Partial<import('../src/shared/types').AppSettings>): Promise<import('../src/shared/types').AppSettings> {
+    return ipcRenderer.invoke('settings:update', partial)
   },
 
   // ── Window controls ─────────────────────────────────────────────────────────

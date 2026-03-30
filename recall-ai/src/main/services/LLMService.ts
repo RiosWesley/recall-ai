@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { nanoid } from 'nanoid';
 import { ModelManager } from './ModelManager';
 import { MODEL_REGISTRY } from './modelRegistry';
+import { SettingsService } from './SettingsService';
+import fs from 'node:fs';
 
 const _dirname = typeof __dirname !== 'undefined'
   ? __dirname
@@ -45,7 +47,10 @@ export class LLMService {
     this.initializationPromise = new Promise(async (resolve, reject) => {
       try {
         console.log('[LLMService] Resolving LLM model path...');
-        const modelPath = await ModelManager.getInstance().resolve('llm');
+        const customPath = SettingsService.getInstance().get().customLlmPath;
+        let modelPath = customPath && fs.existsSync(customPath) 
+          ? customPath 
+          : await ModelManager.getInstance().resolve('llm');
 
         console.log('[LLMService] Forking Utility Process...');
         

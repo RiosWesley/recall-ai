@@ -4,6 +4,7 @@ import { ChunkRepository } from '../db/repositories/ChunkRepository'
 import { VectorRepository } from '../db/repositories/VectorRepository'
 import { EmbeddingService } from './EmbeddingService'
 import type { SearchOptions, SearchResult } from '../../shared/types'
+import { SettingsService } from './SettingsService'
 
 export class SearchService {
   private static instance: SearchService | null = null
@@ -28,8 +29,10 @@ export class SearchService {
 
   async search(query: string, options?: SearchOptions, precomputedEmbedding?: Float32Array): Promise<SearchResult[]> {
     const start = performance.now()
-    const limit = options?.limit || 10
+    const config = SettingsService.getInstance().get()
+    const limit = options?.limit || config.topK
     const isHybrid = options?.hybrid ?? true
+    const alpha = config.alpha
     const chatId = options?.chatId
 
     if (!query.trim()) return []
@@ -60,7 +63,7 @@ export class SearchService {
     const ftsQuery = query.replace(/[^\p{L}\p{N}\s_]/gu, ' ').replace(/\s+/g, ' ').trim()
 
     const vectorResults = (isHybrid && ftsQuery.length > 0)
-      ? this.vectorRepo.hybridSearch(queryEmbedding, ftsQuery, limit, 0.7, chatId)
+      ? this.vectorRepo.hybridSearch(queryEmbedding, ftsQuery, limit, alpha, chatId)
       : this.vectorRepo.search(queryEmbedding, limit, chatId)
 
     // 3. Enrich with Chunks and Chats

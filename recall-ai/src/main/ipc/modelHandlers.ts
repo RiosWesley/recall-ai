@@ -10,7 +10,7 @@
  *   models:progress  → ModelDownloadProgress (events, not request-response)
  */
 
-import { ipcMain } from 'electron'
+import { ipcMain, dialog } from 'electron'
 import type { BrowserWindow } from 'electron'
 import { ModelManager } from '../services/ModelManager'
 import type { ModelKey, ModelDownloadProgress } from '../../shared/types'
@@ -42,5 +42,22 @@ export function registerModelHandlers(win: BrowserWindow): void {
         win.webContents.send('models:progress', progress)
       }
     })
+  })
+
+  /**
+   * models:select-file — Opens a native dialog to pick a custom .gguf file.
+   */
+  ipcMain.handle('models:select-file', async (): Promise<string | null> => {
+    const result = await dialog.showOpenDialog(win, {
+      title: 'Selecionar Modelo GGUF (BYOM)',
+      filters: [
+        { name: 'GGUF Models', extensions: ['gguf'] },
+        { name: 'Todos os arquivos', extensions: ['*'] },
+      ],
+      properties: ['openFile'],
+    })
+
+    if (result.canceled || result.filePaths.length === 0) return null
+    return result.filePaths[0]
   })
 }

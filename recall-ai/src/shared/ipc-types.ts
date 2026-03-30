@@ -43,6 +43,9 @@ export interface ElectronAPI {
    */
   onModelProgress(cb: (progress: ModelDownloadProgress) => void): () => void
 
+  /** Opens a native file picker strictly for .gguf model files */
+  selectModelFile(): Promise<string | null>
+
   // ── Search ──────────────────────────────────────────────────────────────────
   search(query: string, options?: SearchOptions): Promise<SearchResult[]>
 
@@ -50,6 +53,10 @@ export interface ElectronAPI {
   askRAG(question: string, options?: import('./types').RAGOptions): Promise<void>
   onRAGToken(cb: (token: string) => void): () => void
   onRAGDone(cb: (response: import('./types').RAGResponse) => void): () => void
+
+  // ── Settings ────────────────────────────────────────────────────────────────
+  getSettings(): Promise<import('./types').AppSettings>
+  updateSettings(partial: Partial<import('./types').AppSettings>): Promise<import('./types').AppSettings>
 
   // ── Window controls ─────────────────────────────────────────────────────────
   windowMinimize(): void

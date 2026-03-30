@@ -2,6 +2,8 @@ import { getLlama, type Llama, type LlamaModel } from 'node-llama-cpp'
 import { ModelManager } from './ModelManager'
 import { detectGpu } from './gpu-detection'
 import { MODEL_REGISTRY } from './modelRegistry'
+import { SettingsService } from './SettingsService'
+import fs from 'node:fs'
 
 export class EmbeddingService {
   private static instance: EmbeddingService | null = null
@@ -40,7 +42,10 @@ export class EmbeddingService {
         console.log(`[EmbeddingService] GPU Detected: ${gpuInfo.backend || 'none'}`)
 
         console.log('[EmbeddingService] Resolving embedding model...')
-        const modelPath = await ModelManager.getInstance().resolve('embedding')
+        const customPath = SettingsService.getInstance().get().customEmbeddingPath
+        let modelPath = customPath && fs.existsSync(customPath) 
+          ? customPath 
+          : await ModelManager.getInstance().resolve('embedding')
         
         this.model = await this.llama.loadModel({ 
           modelPath,
