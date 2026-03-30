@@ -52,7 +52,7 @@ export interface RawChunk {
 // ─── Default Config ───────────────────────────────────────────────────────────
 
 export const DEFAULT_CHUNKING_CONFIG: ChunkingConfig = {
-  timeWindowSeconds: 5 * 60, // 5 minutes
-  maxTokens: 256,
-  overlapMessages: 1,
+  timeWindowSeconds: 10 * 60, // 10 minutos (era 5)
+  maxTokens: 512,             // (era 256)
+  overlapMessages: 3,         // (era 1)
 }

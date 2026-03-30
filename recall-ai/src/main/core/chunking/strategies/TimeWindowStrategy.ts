@@ -70,10 +70,10 @@ export class TimeWindowStrategy {
 function buildChunk(messages: ParsedMessage[]): RawChunk {
   const participants = [...new Set(messages.map((m) => m.sender))]
 
-  // content = plain text, no metadata, separated by newlines
+  // content = text with sender, separated by newlines
   const content = messages
     .filter((m) => m.type !== 'system') // exclude system noise from embedding
-    .map((m) => m.content)
+    .map((m) => `${m.sender}: ${m.content}`)
     .join('\n')
 
   // displayContent = human-readable with sender and time
