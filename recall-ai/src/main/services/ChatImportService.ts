@@ -26,6 +26,7 @@ import { EmbeddingService } from './EmbeddingService'
 import { computeTermStats, TopicClassifier } from './import/StatsGenerator'
 import { buildProfileFacts } from './import/ProfileFactsBuilder'
 import { ProfileFactRepository } from '../db/repositories/ProfileFactRepository'
+import { MapReduceEngine } from './import/MapReduceEngine'
 
 import type { ImportProgress, ImportResult } from '../../shared/types'
 import type { NewMessage, NewChunk } from '../../shared/types'
@@ -43,6 +44,8 @@ export class ChatImportService {
     const emit = (progress: ImportProgress) => {
       sender?.send('import:progress', progress)
     }
+
+    let chatId: string | undefined
 
     try {
       // ── Stage 1: Reading / hash ────────────────────────────────────────────
@@ -62,7 +65,7 @@ export class ChatImportService {
       }
 
       const chatName = basename(filePath).replace(/\.[^/.]+$/, '')
-      const chatId = nanoid()
+      chatId = nanoid()
 
       // ── Stage 2: Parsing ──────────────────────────────────────────────────
       emit({ stage: 'parsing', percent: 20, label: 'Parseando mensagens', detail: 'Extraindo mensagens do formato WhatsApp...' })
@@ -78,6 +81,35 @@ export class ChatImportService {
 
       emit({ stage: 'parsing', percent: 40, label: 'Parseando mensagens', detail: `${parseResult.messages.length.toLocaleString('pt-BR')} mensagens encontradas` })
 
+      // Convert messages to NewMessage with ID
+      const newMessages: NewMessage[] = parseResult.messages.map((m) => ({
+        id: nanoid(),
+        chat_id: chatId!,
+        sender: m.sender,
+        content: m.content,
+        timestamp: m.timestamp,
+        type: m.type,
+        raw: m.raw,
+      }))
+
+      // Persist empty chat FIRST to satisfy FOREIGN KEY constraints downstream 
+      // (chunkRepository, mapReduceEngine, etc)
+      chatRepo.create({
+        id: chatId!,
+        name: chatName,
+        source: 'whatsapp',
+        file_hash: fileHash,
+        participant_count: parseResult.stats.participants.length,
+        message_count: parseResult.messages.length,
+        first_message_at: parseResult.stats.firstTimestamp ?? undefined,
+        last_message_at: parseResult.stats.lastTimestamp ?? undefined,
+      })
+
+      // ── Stage 2.5: Map-Reduce Profile ──────────────────────────────────────
+      const mapReduceEngine = new MapReduceEngine()
+      // We pass newMessages which implements Message interface fully
+      await mapReduceEngine.runMapReduce(newMessages as any, chatName, chatId!, emit)
+
       // ── Stage 3: Chunking ─────────────────────────────────────────────────
       emit({ stage: 'chunking', percent: 50, label: 'Segmentando chunks', detail: 'Agrupando mensagens por janela de tempo...' })
 
@@ -85,7 +117,7 @@ export class ChatImportService {
       
       const newChunks: NewChunk[] = rawChunks.map((c) => ({
         id: nanoid(),
-        chat_id: chatId,
+        chat_id: chatId!,
         content: c.content,
         display_content: c.displayContent,
         start_time: c.startTime,
@@ -147,16 +179,7 @@ export class ChatImportService {
       // ── Stage 4.5: Profile Facts ──────────────────────────────────────────
       emit({ stage: 'embedding', percent: 85, label: 'Analisando perfil', detail: 'Calculando N-grams e identificando tópicos...' })
       
-      const newMessages: NewMessage[] = parseResult.messages.map((m) => ({
-        id: nanoid(),
-        chat_id: chatId,
-        sender: m.sender,
-        content: m.content,
-        timestamp: m.timestamp,
-        type: m.type,
-        raw: m.raw,
-      }))
-
+      // We already created newMessages above, so we don't need to do it here again.
       const termStats = computeTermStats(newMessages)
       
       const topicClassifier = new TopicClassifier()
@@ -193,17 +216,6 @@ export class ChatImportService {
       // ── Stage 5: Storing ──────────────────────────────────────────────────
       emit({ stage: 'storing', percent: 88, label: 'Salvando no banco', detail: 'Persistindo dados da importação...' })
 
-      chatRepo.create({
-        id: chatId,
-        name: chatName,
-        source: 'whatsapp',
-        file_hash: fileHash,
-        participant_count: parseResult.stats.participants.length,
-        message_count: parseResult.messages.length,
-        first_message_at: parseResult.stats.firstTimestamp ?? undefined,
-        last_message_at: parseResult.stats.lastTimestamp ?? undefined,
-      })
-
       const messageRepo = new MessageRepository(db)
       messageRepo.insertBatch(newMessages)
 
@@ -223,12 +235,23 @@ export class ChatImportService {
 
       return {
         success: true,
-        chatId: chatId,
+        chatId: chatId!,
         chatName: chatName,
         messageCount: parseResult.messages.length,
         chunkCount: rawChunks.length,
       }
     } catch (err) {
+      // Clean up partial chat record if it was inserted
+      try {
+          if (chatId) {
+             const db = DatabaseService.getInstance()
+             const chatRepo = new ChatRepository(db)
+             chatRepo.delete(chatId) // Cascade deletes chunks/vectors
+          }
+      } catch (cleanupErr) {
+          console.error('[ChatImportService] Cleanup failed:', cleanupErr)
+      }
+
       const message = err instanceof Error ? err.message : String(err)
       console.error('[ChatImportService] Import failed:', message)
       emit({ stage: 'error', percent: 0, label: 'Erro na importação', detail: message })

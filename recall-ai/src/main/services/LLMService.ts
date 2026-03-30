@@ -16,6 +16,7 @@ export interface GenerateOptions {
   topP?: number;
   maxTokens?: number;
   systemPrompt?: string;
+  clearCache?: boolean;
 }
 
 export interface ModelInfo {

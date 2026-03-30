@@ -232,6 +232,34 @@ export interface RAGResponse {
   latency: RAGLatency
 }
 
+// ─── MAP-REDUCE ENGINE ────────────────────────────────────────────────────────
+
+export interface ContactProfile {
+  id?: string
+  contact_id: string
+  contact_name: string
+  profile_text: string
+  message_count: number
+  date_range_start: string
+  date_range_end: string
+  model_used: string
+  block_count: number
+  processing_time_ms: number
+  created_at?: number
+  updated_at?: number
+}
+
+export interface BlockSummary {
+  id?: string
+  contact_id: string
+  block_index: number
+  start_date: string
+  end_date: string
+  message_count: number
+  summary_text: string
+  created_at?: number
+}
+
 // ─── SETTINGS ────────────────────────────────────────────────────────────────
 
 export interface AppSettings {

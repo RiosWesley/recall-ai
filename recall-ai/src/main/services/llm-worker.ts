@@ -4,6 +4,7 @@ import { performance } from 'node:perf_hooks';
 let llama: Llama | null = null;
 let model: LlamaModel | null = null;
 let context: LlamaContext | null = null;
+let activeSequence: any | null = null;
 
 // Helper function para obter o parentPort independentemente dos tipos estritos
 const getParentPort = () => (process as any).parentPort;
@@ -61,27 +62,30 @@ async function handleInit(id: string, payload: { modelPath: string }) {
   }
 
   context = await model.createContext({
-    // Espaço de contexto do RAG
-    contextSize: 4096 
+    // Espaço de contexto do RAG + MapReduce
+    contextSize: 8192 
   });
+
+  activeSequence = context.getSequence();
 
   getParentPort().postMessage({ type: 'init-ready', id });
 }
 
 async function handleGenerate(id: string, payload: { prompt: string, options?: any }) {
-  if (!llama || !model || !context) {
+  if (!llama || !model || !context || !activeSequence) {
     throw new Error('LLM Worker is not initialized. Send "init" first.');
   }
 
   const { prompt, options = {} } = payload;
   const start = performance.now();
 
-  const sequence = context.getSequence();
+  console.log('[LLM Worker] Clearing sequence history for stateless evaluation');
+  activeSequence.clearHistory();
 
   // Uma nova sessão isola os contextos da query, e a flag systemPrompt gerencia 
   // o wrapper nativo do chat de cada modelo GGUF usando Jinja templating.
   const session = new LlamaChatSession({
-    contextSequence: sequence,
+    contextSequence: activeSequence,
     systemPrompt: options.systemPrompt
   });
 
@@ -110,10 +114,8 @@ async function handleGenerate(id: string, payload: { prompt: string, options?: a
       }
     });
   } finally {
-    // ESSENTIAL: For stateless single-turn RAG generation, we MUST dispose 
-    // the sequence back to the context. Otherwise, memory leaks block subsequent queries 
-    // with 'No sequences left' crashes.
-    sequence.dispose();
+    // Nós não chamamos mais sequence.dispose(), mantemos a mesma viva 
+    // e limpamos a história explicitamente se clearCache = true
   }
 }
 

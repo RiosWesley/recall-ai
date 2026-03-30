@@ -4,6 +4,8 @@ import { LLMService } from './LLMService'
 import { promptTemplates } from './promptTemplates'
 import type { RAGOptions, RAGResponse, RAGLatency, SearchResult } from '../../shared/types'
 import { SettingsService } from './SettingsService'
+import { DatabaseService } from '../db/database'
+import { ContactProfileRepository } from '../db/repositories/ContactProfileRepository'
 
 export class RAGService {
   private static instance: RAGService | null = null
@@ -40,11 +42,45 @@ export class RAGService {
         queryEmbedding = new Float32Array(384)
       }
 
-      // 2. Search
-      const searchStart = performance.now()
-      const searchService = SearchService.getInstance()
+      const needsSpecifics = /\b(disse|falou|mandou|exatamente|literalmente|quando|que dia|que hora|última mensagem|print|copia|cole|como assim)\b/i.test(question)
+      const profileRepo = new ContactProfileRepository(DatabaseService.getInstance())
+      const contactProfile = options?.chatId ? profileRepo.findByChatId(options.chatId) : null
       const config = SettingsService.getInstance().get()
-      context = await searchService.search(question, { hybrid: true, limit: config.topK, chatId: options?.chatId }, queryEmbedding)
+
+      const searchStart = performance.now()
+      
+      // If we have a robust profile and the user just asked a generic question, skip vector database completely!
+      if (contactProfile && !needsSpecifics) {
+        context.push({
+          id: `profile-${contactProfile.id}`,
+          chatId: contactProfile.contact_id,
+          chatName: contactProfile.contact_name,
+          score: 1.0,
+          content: `PERFIL DA CONVERSA E FATOS GERAIS:\n${contactProfile.profile_text}`,
+          date: 'Análise Dossiê',
+          sender: '🤖 Sistema',
+          chunkId: contactProfile.id!
+        })
+      } else {
+        // We either need specifics, or don't have a profile. Do hybrid RRF search.
+        const searchService = SearchService.getInstance()
+        context = await searchService.search(question, { hybrid: true, limit: config.topK, chatId: options?.chatId }, queryEmbedding)
+        
+        // Inject profile at the top if available to give LLM maximum situational awareness
+        if (contactProfile) {
+          context.unshift({
+            id: `profile-${contactProfile.id}`,
+            chatId: contactProfile.contact_id,
+            chatName: contactProfile.contact_name,
+            score: 1.0,
+            content: `PERFIL DA CONVERSA:\n${contactProfile.profile_text}`,
+            date: 'Análise Dossiê',
+            sender: '🤖 Sistema',
+            chunkId: contactProfile.id!
+          })
+        }
+      }
+      
       latency.search = performance.now() - searchStart
 
       // 3. Early return if no context is found
