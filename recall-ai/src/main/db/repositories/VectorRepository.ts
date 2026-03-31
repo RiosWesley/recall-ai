@@ -79,9 +79,10 @@ export class VectorRepository {
    * Perform a KNN search for the closest chunks to a query embedding.
    * @param queryEmbedding - Float32Array of length 384
    * @param topK - Number of results to return
-   * @param chatId - Optional chat ID to filter results by
+   * @param dateFrom - Optional start timestamp filter
+   * @param dateTo - Optional end timestamp filter
    */
-  search(queryEmbedding: Float32Array, topK = 10, chatId?: string): VectorResult[] {
+  search(queryEmbedding: Float32Array, topK = 10, chatId?: string, dateFrom?: number, dateTo?: number): VectorResult[] {
     if (!this.isAvailable) {
       console.warn('[VectorRepository] sqlite-vec not available — returning empty results')
       return []
@@ -95,10 +96,22 @@ export class VectorRepository {
     `
     const params: any[] = [buffer]
 
-    if (chatId) {
+    if (chatId || dateFrom !== undefined || dateTo !== undefined) {
       sql += ` JOIN chunks c ON c.id = v.chunk_id
-      WHERE v.embedding MATCH ? AND c.chat_id = ? `
-      params.push(chatId)
+      WHERE v.embedding MATCH ? `
+      
+      if (chatId) {
+          sql += ` AND c.chat_id = ? `
+          params.push(chatId)
+      }
+      if (dateFrom != null) {
+          sql += ` AND c.start_time >= ? `
+          params.push(dateFrom)
+      }
+      if (dateTo != null) {
+          sql += ` AND c.end_time <= ? `
+          params.push(dateTo)
+      }
     } else {
       sql += ` WHERE v.embedding MATCH ? `
     }
@@ -125,20 +138,50 @@ export class VectorRepository {
     queryText: string,
     topK = 10,
     alpha = 0.7,
-    chatId?: string
+    chatId?: string,
+    dateFrom?: number,
+    dateTo?: number
   ): VectorResult[] {
     return this._hybridSearchCore(
-      'chunks', 
+      'child_chunks', 
       'chunk_id', 
-      'vectors', 
-      'chunks_fts', 
+      'child_vectors', 
+      'child_chunks_fts', 
       queryEmbedding, 
       queryText, 
       topK, 
       alpha, 
       chatId, 
       'chat_id',
-      'content'
+      'content',
+      dateFrom,
+      dateTo
+    )
+  }
+
+  hybridSearchPropositions(
+    queryEmbedding: Float32Array,
+    queryText: string,
+    topK = 10,
+    alpha = 0.7,
+    chatId?: string,
+    dateFrom?: number,
+    dateTo?: number
+  ): VectorResult[] {
+    return this._hybridSearchCore(
+      'propositions', 
+      'proposition_id', 
+      'proposition_vectors', 
+      'propositions_fts', 
+      queryEmbedding, 
+      queryText, 
+      topK, 
+      alpha, 
+      chatId, 
+      'chat_id',
+      'fact',
+      dateFrom,
+      dateTo
     )
   }
 
@@ -178,7 +221,9 @@ export class VectorRepository {
     alpha: number,
     chatId?: string,
     chatIdColumn = 'chat_id',
-    ftsContentColumn = 'content'
+    ftsContentColumn = 'content',
+    dateFrom?: number,
+    dateTo?: number
   ): VectorResult[] {
     if (!this.isAvailable) {
       // Fallback to FTS5 only
@@ -189,11 +234,23 @@ export class VectorRepository {
     const beta = 1 - alpha
     const fetchCount = topK * 5
 
-    const semTable = chatId ? `${vecTable} v JOIN ${baseTable} c ON c.id = v.${idColumn}` : `${vecTable} v`
-    const semWhere = chatId ? `v.embedding MATCH ? AND v.k = ? AND c.${chatIdColumn} = ?` : `v.embedding MATCH ? AND v.k = ?`
+    const hasTimeRangeCols = (baseTable === 'chunks' || baseTable === 'child_chunks')
+
+    const hasDateFilters = hasTimeRangeCols && (dateFrom != null || dateTo != null)
+    const joinBase = chatId || hasDateFilters
+
+    const semTable = joinBase ? `${vecTable} v JOIN ${baseTable} c ON c.id = v.${idColumn}` : `${vecTable} v`
     
-    const kwTable = chatId ? `${ftsTable} f JOIN ${baseTable} c ON c.id = f.${idColumn}` : `${ftsTable} f`
-    const kwWhere = chatId ? `f.${ftsContentColumn} MATCH ? AND c.${chatIdColumn} = ?` : `f.${ftsContentColumn} MATCH ?`
+    let semWhere = `v.embedding MATCH ? AND v.k = ?`
+    if (chatId) semWhere += ` AND c.${chatIdColumn} = ?`
+    if (hasTimeRangeCols && dateFrom != null) semWhere += ` AND c.start_time >= ?`
+    if (hasTimeRangeCols && dateTo != null) semWhere += ` AND c.end_time <= ?`
+
+    const kwTable = joinBase ? `${ftsTable} f JOIN ${baseTable} c ON c.id = f.${idColumn}` : `${ftsTable} f`
+    let kwWhere = `f.${ftsContentColumn} MATCH ?`
+    if (chatId) kwWhere += ` AND c.${chatIdColumn} = ?`
+    if (hasTimeRangeCols && dateFrom != null) kwWhere += ` AND c.start_time >= ?`
+    if (hasTimeRangeCols && dateTo != null) kwWhere += ` AND c.end_time <= ?`
 
     const sql = `
       WITH semantic AS (
@@ -226,8 +283,15 @@ export class VectorRepository {
     const params: any[] = []
     params.push(buffer, fetchCount)
     if (chatId) params.push(chatId)
+    if (hasTimeRangeCols && dateFrom != null) params.push(dateFrom)
+    if (hasTimeRangeCols && dateTo != null) params.push(dateTo)
+    
     params.push(queryText)
+    
     if (chatId) params.push(chatId)
+    if (hasTimeRangeCols && dateFrom != null) params.push(dateFrom)
+    if (hasTimeRangeCols && dateTo != null) params.push(dateTo)
+    
     params.push(fetchCount, alpha, beta, topK)
 
     return this.db.prepare(sql).all(...params) as VectorResult[]

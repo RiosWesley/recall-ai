@@ -27,9 +27,10 @@ import { computeTermStats, TopicClassifier } from './import/StatsGenerator'
 import { buildProfileFacts } from './import/ProfileFactsBuilder'
 import { ProfileFactRepository } from '../db/repositories/ProfileFactRepository'
 import { MapReduceEngine } from './import/MapReduceEngine'
+import { PropositionExtractor, type Proposition } from './import/PropositionExtractor'
 
 import type { ImportProgress, ImportResult } from '../../shared/types'
-import type { NewMessage, NewChunk } from '../../shared/types'
+import type { NewMessage, NewParentChunk, NewChildChunk } from '../../shared/types'
 
 export class ChatImportService {
   private readonly parser = new WhatsAppParser()
@@ -113,10 +114,10 @@ export class ChatImportService {
       // ── Stage 3: Chunking ─────────────────────────────────────────────────
       emit({ stage: 'chunking', percent: 50, label: 'Segmentando chunks', detail: 'Agrupando mensagens por janela de tempo...' })
 
-      const rawChunks = this.chunker.chunk(parseResult.messages)
+      const chunkResult = this.chunker.chunk(parseResult.messages)
       
-      const newChunks: NewChunk[] = rawChunks.map((c) => ({
-        id: nanoid(),
+      const newParents: NewParentChunk[] = chunkResult.parents.map((c) => ({
+        id: c.id,
         chat_id: chatId!,
         content: c.content,
         display_content: c.displayContent,
@@ -127,38 +128,72 @@ export class ChatImportService {
         participants: c.participants,
       }))
 
-      emit({ stage: 'chunking', percent: 65, label: 'Segmentando chunks', detail: `${rawChunks.length} chunks criados` })
+      const newChildren: NewChildChunk[] = chunkResult.children.map((c) => ({
+        id: nanoid(),
+        parent_id: c.parentId,
+        chat_id: chatId!,
+        content: c.content,
+        display_content: c.displayContent,
+        start_time: c.startTime,
+        end_time: c.endTime,
+        message_count: c.messageCount,
+        child_index: c.childIndex
+      }))
+
+      emit({ stage: 'chunking', percent: 65, label: 'Segmentando chunks', detail: `${newParents.length} parents e ${newChildren.length} children criados` })
+
+      // ── Stage 3.5: Propositions ───────────────────────────────────────────
+      emit({ stage: 'chunking', percent: 65, label: 'Lendo mensagens a fundo', detail: 'Iniciando extração de proposições (pode demorar)...' })
+      const extractor = new PropositionExtractor()
+      const rawPropositions: (Proposition & { id: string, parentChunkId: string })[] = []
+      
+      let propsExtracted = 0
+      for (const parent of newParents) {
+        const props = await extractor.extract(parent.content)
+        for (const p of props) {
+            rawPropositions.push({
+                ...p,
+                id: nanoid(),
+                parentChunkId: parent.id
+            })
+        }
+        propsExtracted++
+        emit({ stage: 'chunking', percent: 65 + Math.round((propsExtracted / newParents.length) * 10), label: 'Lendo fatos isolados', detail: `Extraindo proposições do bloco ${propsExtracted}/${newParents.length}` })
+      }
 
       // ── Stage 4: Embedding ────────────────────────────────────────────────
-      emit({ stage: 'embedding', percent: 66, label: 'Preparando IA', detail: 'Verificando motor de busca semântica...' })
+      // Now mapping 75 to 85% for embeddings
+      emit({ stage: 'embedding', percent: 75, label: 'Preparando IA', detail: 'Verificando motor de busca semântica...' })
 
       const modelManager = ModelManager.getInstance()
       const isAvailable = await modelManager.isAvailable('embedding')
 
       if (!isAvailable) {
-        emit({ stage: 'embedding', percent: 66, label: 'Baixando modelo', detail: 'Iniciando download (apenas na 1ª vez)...' })
+        emit({ stage: 'embedding', percent: 75, label: 'Baixando modelo', detail: 'Iniciando download (apenas na 1ª vez)...' })
         await modelManager.download('embedding', (progress) => {
            const mbDownloaded = (progress.downloadedBytes / 1024 / 1024).toFixed(1)
            const mbTotal = (progress.totalBytes / 1024 / 1024).toFixed(1)
            emit({ 
              stage: 'embedding', 
-             percent: 66 + Math.round(progress.percent * 0.08), // from 66 to 74%
+             percent: 75 + Math.round(progress.percent * 0.05), // from 75 to 80%
              label: 'Baixando modelo', 
              detail: `${progress.percent}% — ${mbDownloaded}MB / ${mbTotal}MB` 
            })
         })
       }
 
-      emit({ stage: 'embedding', percent: 74, label: 'Inicializando IA', detail: 'Carregando modelo na memória...' })
+      emit({ stage: 'embedding', percent: 80, label: 'Inicializando IA', detail: 'Carregando modelo na memória...' })
       const embeddingService = EmbeddingService.getInstance()
       await embeddingService.initialize()
 
       const vectorsToInsert: { chunkId: string; embedding: Float32Array }[] = []
+      const propVectorsToInsert: { propId: string; embedding: Float32Array }[] = []
       const BATCH_SIZE = 100
       let processed = 0
+
       
-      for (let i = 0; i < newChunks.length; i += BATCH_SIZE) {
-        const batch = newChunks.slice(i, i + BATCH_SIZE)
+      for (let i = 0; i < newChildren.length; i += BATCH_SIZE) {
+        const batch = newChildren.slice(i, i + BATCH_SIZE)
         const texts = batch.map(c => c.content)
         
         const embeddings = await embeddingService.embedBatch(texts)
@@ -170,9 +205,29 @@ export class ChatImportService {
         processed += batch.length
         emit({ 
           stage: 'embedding', 
-          percent: 74 + Math.round((processed / newChunks.length) * 11), // maps to 74-85%
+          percent: 80 + Math.round((processed / (newChildren.length + rawPropositions.length)) * 5), // maps to 80-85%
           label: 'Gerando embeddings', 
-          detail: `${processed} / ${newChunks.length} chunks` 
+          detail: `${processed} / ${newChildren.length + rawPropositions.length} vetores` 
+        })
+      }
+
+      // Prop embeddings
+      for (let i = 0; i < rawPropositions.length; i += BATCH_SIZE) {
+        const batch = rawPropositions.slice(i, i + BATCH_SIZE)
+        const texts = batch.map(c => c.fact)
+        
+        const embeddings = await embeddingService.embedBatch(texts)
+        
+        for (let j = 0; j < batch.length; j++) {
+          propVectorsToInsert.push({ propId: batch[j].id, embedding: embeddings[j] })
+        }
+        
+        processed += batch.length
+        emit({ 
+          stage: 'embedding', 
+          percent: 80 + Math.round((processed / (newChildren.length + rawPropositions.length)) * 5),
+          label: 'Gerando embeddings de proposições', 
+          detail: `${processed} / ${newChildren.length + rawPropositions.length} vetores` 
         })
       }
 
@@ -194,7 +249,7 @@ export class ChatImportService {
       }
 
       emit({ stage: 'embedding', percent: 86, label: 'Analisando perfil', detail: 'Gerando Profile Facts (memórias sintéticas)...' })
-      const rawFacts = buildProfileFacts(chatName, chatId, termStats, topicCounts, newChunks.length)
+      const rawFacts = buildProfileFacts(chatName, chatId, termStats, topicCounts, newParents.length)
       
       // We also need to embed these profile facts
       const factsToInsert: any[] = []
@@ -221,7 +276,7 @@ export class ChatImportService {
 
       emit({ stage: 'storing', percent: 90, label: 'Salvando no banco', detail: 'Indexando chunks no FTS5...' })
       const chunkRepo = new ChunkRepository(db)
-      chunkRepo.insertBatch(newChunks)
+      chunkRepo.insertParentChildBatch(newParents, newChildren)
 
       emit({ stage: 'storing', percent: 95, label: 'Salvando no banco', detail: 'Inserindo vetores e fatos de perfil...' })
       const vectorRepo = new VectorRepository(db)
@@ -231,14 +286,39 @@ export class ChatImportService {
       const profileFactRepo = new ProfileFactRepository(db)
       profileFactRepo.insertBatch(factsToInsert)
 
-      emit({ stage: 'done', percent: 100, label: 'Importação concluída', detail: `${parseResult.messages.length.toLocaleString('pt-BR')} mensagens indexadas` })
+      // Inserção das proposições via sql cru por simplicidade, no futuro migrar para repository.
+      const insertProp = db.prepare(`
+        INSERT INTO propositions (id, chat_id, parent_chunk_id, fact, category, fact_date, actors, original_quote)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      const insertPropFts = db.prepare(`
+        INSERT INTO propositions_fts (fact, original_quote, proposition_id)
+        VALUES (?, ?, ?)
+      `)
+
+      db.transaction(() => {
+        for (const p of rawPropositions) {
+            insertProp.run(p.id, chatId!, p.parentChunkId, p.fact, p.category, p.fact_date, JSON.stringify(p.actors), p.original_quote)
+            insertPropFts.run(p.fact, p.original_quote, p.id)
+        }
+        
+        const insertPropVec = db.prepare(`
+          INSERT INTO proposition_vectors (proposition_id, embedding)
+          VALUES (?, ?)
+        `)
+        for (const pv of propVectorsToInsert) {
+           insertPropVec.run(pv.propId, pv.embedding)
+        }
+      })()
+
+      emit({ stage: 'done', percent: 100, label: 'Importação concluída', detail: `${parseResult.messages.length.toLocaleString('pt-BR')} mensagens indexadas com proposições` })
 
       return {
         success: true,
         chatId: chatId!,
         chatName: chatName,
         messageCount: parseResult.messages.length,
-        chunkCount: rawChunks.length,
+        chunkCount: newParents.length,
       }
     } catch (err) {
       // Clean up partial chat record if it was inserted

@@ -81,6 +81,30 @@ export interface NewChunk {
   participants?: string[]
 }
 
+export interface NewParentChunk {
+  id: string
+  chat_id: string
+  content: string
+  display_content: string
+  start_time: number
+  end_time: number
+  message_count?: number
+  token_count?: number
+  participants?: string[]
+}
+
+export interface NewChildChunk {
+  id: string
+  parent_id: string
+  chat_id: string
+  content: string
+  display_content: string
+  start_time: number
+  end_time: number
+  message_count?: number
+  child_index: number
+}
+
 // ─── VECTOR ──────────────────────────────────────────────────────────────────
 
 export interface VectorResult {
@@ -106,6 +130,8 @@ export interface SearchOptions {
   hybrid?: boolean
   chatId?: string
   limit?: number
+  dateFrom?: number
+  dateTo?: number
 }
 
 export interface SearchResult {

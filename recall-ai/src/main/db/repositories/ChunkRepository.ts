@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
 import { nanoid } from 'nanoid'
-import type { Chunk, NewChunk } from '../../../shared/types'
+import type { Chunk, NewChunk, NewParentChunk, NewChildChunk } from '../../../shared/types'
 
 /**
  * ChunkRepository — manages semantic chunks and their FTS5 index.
@@ -53,6 +53,71 @@ export class ChunkRepository {
     runAll(chunks)
   }
 
+  /**
+   * Insert parent chunks, child chunks, and child FTS5 entries in a single transaction.
+   */
+  insertParentChildBatch(parents: NewParentChunk[], children: NewChildChunk[]): void {
+    if (parents.length === 0) return
+
+    const insertParent = this.db.prepare(`
+      INSERT INTO parent_chunks (
+        id, chat_id, content, display_content,
+        start_time, end_time, message_count, token_count, participants
+      ) VALUES (
+        @id, @chat_id, @content, @display_content,
+        @start_time, @end_time, @message_count, @token_count, @participants
+      )
+    `)
+
+    const insertChild = this.db.prepare(`
+      INSERT INTO child_chunks (
+        id, parent_id, chat_id, content, display_content,
+        start_time, end_time, message_count, child_index
+      ) VALUES (
+        @id, @parent_id, @chat_id, @content, @display_content,
+        @start_time, @end_time, @message_count, @child_index
+      )
+    `)
+
+    const insertFts = this.db.prepare(`
+      INSERT INTO child_chunks_fts (content, chunk_id)
+      VALUES (@content, @chunk_id)
+    `)
+
+    const runAll = this.db.transaction((ps: NewParentChunk[], cs: NewChildChunk[]) => {
+      for (const parent of ps) {
+        insertParent.run({
+          id: parent.id,
+          chat_id: parent.chat_id,
+          content: parent.content,
+          display_content: parent.display_content,
+          start_time: parent.start_time,
+          end_time: parent.end_time,
+          message_count: parent.message_count ?? 0,
+          token_count: parent.token_count ?? 0,
+          participants: parent.participants ? JSON.stringify(parent.participants) : null,
+        })
+      }
+
+      for (const child of cs) {
+        insertChild.run({
+          id: child.id,
+          parent_id: child.parent_id,
+          chat_id: child.chat_id,
+          content: child.content,
+          display_content: child.display_content,
+          start_time: child.start_time,
+          end_time: child.end_time,
+          message_count: child.message_count ?? 0,
+          child_index: child.child_index,
+        })
+        insertFts.run({ content: child.content, chunk_id: child.id })
+      }
+    })
+
+    runAll(parents, children)
+  }
+
   findByChatId(chatId: string): Chunk[] {
     const rows = this.db.prepare(`
       SELECT * FROM chunks
@@ -82,6 +147,50 @@ export class ChunkRepository {
     `).all(...ids) as RawChunk[]
 
     return rows.map(deserializeChunk)
+  }
+
+  findParentsByIds(ids: string[]): Chunk[] {
+    if (ids.length === 0) return []
+
+    // SQLite parameter binding for IN clause
+    const placeholders = ids.map(() => '?').join(', ')
+    const rows = this.db.prepare(`
+      SELECT * FROM parent_chunks
+      WHERE id IN (${placeholders})
+    `).all(...ids) as RawChunk[]
+
+    return rows.map(deserializeChunk)
+  }
+
+  findParentsByChildIds(childIds: string[]): Chunk[] {
+    if (childIds.length === 0) return []
+    const placeholders = childIds.map(() => '?').join(', ')
+    const rows = this.db.prepare(`
+      SELECT p.* FROM parent_chunks p
+      JOIN child_chunks c ON c.parent_id = p.id
+      WHERE c.id IN (${placeholders})
+    `).all(...childIds) as RawChunk[]
+    
+    // Deduplicate parents just in case multiple matching children share the same parent
+    const uniqueParents = Array.from(new Map(rows.map(row => [row.id, row])).values())
+    return uniqueParents.map(deserializeChunk)
+  }
+
+  findParentMapByChildIds(childIds: string[]): Map<string, Chunk> {
+    if (childIds.length === 0) return new Map()
+    const placeholders = childIds.map(() => '?').join(', ')
+    const rows = this.db.prepare(`
+      SELECT c.id AS child_id, p.* 
+      FROM parent_chunks p
+      JOIN child_chunks c ON c.parent_id = p.id
+      WHERE c.id IN (${placeholders})
+    `).all(...childIds) as (RawChunk & { child_id: string })[]
+
+    const map = new Map<string, Chunk>()
+    for (const row of rows) {
+      map.set(row.child_id, deserializeChunk(row))
+    }
+    return map
   }
 
   deleteByChatId(chatId: string): void {

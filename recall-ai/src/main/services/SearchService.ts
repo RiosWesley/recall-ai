@@ -37,6 +37,8 @@ export class SearchService {
     const isHybrid = options?.hybrid ?? true
     const alpha = config.alpha
     const chatId = options?.chatId
+    const dateFrom = options?.dateFrom
+    const dateTo = options?.dateTo
 
     if (!query.trim()) return []
 
@@ -78,30 +80,40 @@ export class SearchService {
     const isPatternQuery = /sempre|frequente|geralmente|costume|toda hora|mais|quantas|padr/i.test(query)
     
     let vectorResults = []
+    let propVectorResults: any[] = []
     let factVectorResults: any[] = []
 
     if (isHybrid && ftsQuery.length > 0) {
       if (isPatternQuery) {
-        // Find facts first
         factVectorResults = this.vectorRepo.hybridSearchFacts(queryEmbedding, ftsQuery, Math.max(limit, 5), alpha, chatId)
-        // Only fallback to chunks if facts are weak, or just mix them
-        vectorResults = this.vectorRepo.hybridSearch(queryEmbedding, ftsQuery, limit, alpha, chatId)
+        vectorResults = this.vectorRepo.hybridSearch(queryEmbedding, ftsQuery, limit, alpha, chatId, dateFrom, dateTo)
+        propVectorResults = this.vectorRepo.hybridSearchPropositions(queryEmbedding, ftsQuery, limit, alpha, chatId, dateFrom, dateTo)
       } else {
-        factVectorResults = this.vectorRepo.hybridSearchFacts(queryEmbedding, ftsQuery, 3, alpha, chatId) // Top 3 facts
-        vectorResults = this.vectorRepo.hybridSearch(queryEmbedding, ftsQuery, limit, alpha, chatId)
+        factVectorResults = this.vectorRepo.hybridSearchFacts(queryEmbedding, ftsQuery, 3, alpha, chatId)
+        vectorResults = this.vectorRepo.hybridSearch(queryEmbedding, ftsQuery, limit, alpha, chatId, dateFrom, dateTo)
+        propVectorResults = this.vectorRepo.hybridSearchPropositions(queryEmbedding, ftsQuery, limit, alpha, chatId, dateFrom, dateTo)
       }
     } else {
-      vectorResults = this.vectorRepo.search(queryEmbedding, limit, chatId)
+      vectorResults = this.vectorRepo.search(queryEmbedding, limit, chatId, dateFrom, dateTo)
       // Since native VectorRepository.search doesn't have a specific table parameter easily exposed, 
-      // we'll primarily rely on Hybrid Search for facts (which is generally expected)
+      // we'll rely on it returning primarily chunks.
     }
 
-    // Reciprocal Rank Fusion of the two result sets
-    const combinedScores = new Map<string, { id: string, type: 'chunk' | 'fact', score: number }>()
+    // Reciprocal Rank Fusion of the three result sets
+    const combinedScores = new Map<string, { id: string, type: 'chunk' | 'prop' | 'fact', score: number }>()
 
     const K = 60
     vectorResults.forEach((r, i) => {
       combinedScores.set(`chunk-${r.chunk_id}`, { id: r.chunk_id, type: 'chunk', score: 1 / (K + i + 1) })
+    })
+    propVectorResults.forEach((r, i) => {
+      const key = `prop-${r.chunk_id}`
+      const existing = combinedScores.get(key)
+      if (existing) {
+        existing.score += 1 / (K + i + 1)
+      } else {
+        combinedScores.set(key, { id: r.chunk_id, type: 'prop', score: 1 / (K + i + 1) })
+      }
     })
     factVectorResults.forEach((r, i) => {
       const key = `fact-${r.chunk_id}`
@@ -117,14 +129,32 @@ export class SearchService {
       .sort((a, b) => b.score - a.score)
       .slice(0, limit)
 
-    // 3. Enrich with Data
-    const chunkIds = sortedMerged.filter(s => s.type === 'chunk').map(s => s.id)
-    const chunks = this.chunkRepo.findByIds(chunkIds)
-    const chunkMap = new Map(chunks.map(c => [c.id, c]))
+    const childChunkIds = sortedMerged.filter(s => s.type === 'chunk').map(s => s.id)
+    const chunkMap = this.chunkRepo.findParentMapByChildIds(childChunkIds)
+
+    const propIds = sortedMerged.filter(s => s.type === 'prop').map(s => s.id)
+    
+    // We need to fetch the parent_chunks for the propositions too
+    // For now we can fetch the propositions from the DB directly to get their parent_chunk_id
+    let propMap = new Map<string, any>()
+    let propParentMap = new Map<string, any>()
+    
+    if (propIds.length > 0) {
+      const db = DatabaseService.getInstance()
+      const ph = propIds.map(() => '?').join(', ')
+      const props = db.prepare(`SELECT * FROM propositions WHERE id IN (${ph})`).all(...propIds) as any[]
+      const propParentIds = props.map(p => p.parent_chunk_id).filter(Boolean)
+      
+      const pChunks = this.chunkRepo.findParentsByIds(propParentIds)
+      
+      propMap = new Map(props.map(p => [p.id, p]))
+      propParentMap = new Map(pChunks.map(c => [c.id, c]))
+    }
 
     const factIds = sortedMerged.filter(s => s.type === 'fact').map(s => s.id)
+    const sampleParent = chunkMap.size > 0 ? Array.from(chunkMap.values())[0] : null
     // Directly fetch facts using basic query as ProfileFactRepository returns all or by contact
-    const allFacts = factIds.length > 0 ? this.factRepo.findByChatId(chatId || chunks[0]?.chat_id || '') : []
+    const allFacts = factIds.length > 0 ? this.factRepo.findByChatId(chatId || sampleParent?.chat_id || '') : []
     const factMap = new Map(allFacts.map(f => [f.id!, f]))
 
     const chatMap = new Map<string, string>()
@@ -159,6 +189,33 @@ export class SearchService {
           date: formattedDate,
           sender: chunk.participants.length > 0 ? chunk.participants[0] : 'Unknown',
           chunkId: chunk.id
+        })
+      } else if (res.type === 'prop') {
+        const prop = propMap.get(res.id)
+        if (!prop) continue
+
+        const parentChunk = propParentMap.get(prop.parent_chunk_id)
+        const chatName = getChatName(prop.chat_id)
+        
+        let dateStr = 'Fato Isolado'
+        if (prop.fact_date) dateStr = prop.fact_date
+        else if (parentChunk) {
+            const date = new Date(parentChunk.start_time * 1000)
+            dateStr = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }).format(date)
+        }
+        
+        // Pass both the fact logic and the full surrounding parent chunk context
+        const contentStr = `🎯 *Proposição Atômica*: "${prop.fact}"\n\nContexto Original:\n${parentChunk?.display_content || prop.original_quote}`
+        
+        finalResults.push({
+          id: `prop-${prop.id}`,
+          chatId: prop.chat_id,
+          chatName,
+          score: Math.min(1.0, res.score * 10),
+          content: contentStr,
+          date: dateStr,
+          sender: '🤖 Fato Analisado',
+          chunkId: parentChunk?.id || prop.id
         })
       } else {
         const fact = factMap.get(res.id)

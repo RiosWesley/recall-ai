@@ -49,10 +49,24 @@ export interface RawChunk {
   participants: string[]
 }
 
+export interface ParentChunk extends RawChunk {
+  id: string
+}
+
+export interface ChildChunk extends RawChunk {
+  parentId: string
+  childIndex: number
+}
+
 // ─── Default Config ───────────────────────────────────────────────────────────
 
 export const DEFAULT_CHUNKING_CONFIG: ChunkingConfig = {
-  timeWindowSeconds: 10 * 60, // 10 minutos (era 5)
-  maxTokens: 512,             // (era 256)
-  overlapMessages: 3,         // (era 1)
+  timeWindowSeconds: 10 * 60, // 10 minutos
+  maxTokens: 1024,             // (era 512, aumentado para ser o parent)
+  overlapMessages: 5,         // Overlap do parent
+}
+
+export const CHILD_CHUNKING_CONFIG = {
+  windowMessages: 8,
+  strideMessages: 5, // Overlap de 3
 }

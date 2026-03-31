@@ -7,7 +7,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   gpu: 'auto',
   temperature: 0.3,
   systemPrompt: 'Você é um assistente encarregado de ler históricos de chat. Responda apenas com o que estiver no contexto.',
-  topK: 5,
+  topK: 15,
   alpha: 0.7,
   history: true,
   analytics: false,
