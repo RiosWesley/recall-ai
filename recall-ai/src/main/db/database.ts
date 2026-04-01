@@ -7,7 +7,8 @@ import { runMigration002 } from './migrations/002_add_profile_facts'
 import { runMigration003 } from './migrations/003_add_contact_profiles'
 import { runMigration004 } from './migrations/004_parent_child_chunks'
 import { runMigration005 } from './migrations/005_propositions'
-import * as sqliteVec from 'sqlite-vec'
+import { runMigration006 } from './migrations/006_intelligent_ingestion'
+
 let instance: Database.Database | null = null
 
 /**
@@ -39,9 +40,6 @@ export class DatabaseService {
     db.pragma('cache_size = -32000') // 32MB cache
     db.pragma('temp_store = MEMORY')
 
-    // Attempt to load the sqlite-vec extension (vector search)
-    DatabaseService.loadSqliteVec(db)
-
     DatabaseService.db = db
 
     runMigrations(db)
@@ -49,42 +47,11 @@ export class DatabaseService {
     runMigration003(db)
     runMigration004(db)
     runMigration005(db)
+    runMigration006(db)
 
     console.log('[DB] Database ready')
 
     return db
-  }
-
-  private static loadSqliteVec(db: Database.Database): void {
-    try {
-      let loaded = false
-      try {
-        sqliteVec.load(db)
-        loaded = true
-        console.log('[DB] sqlite-vec loaded via NPM package')
-      } catch (e) {
-        console.warn('[DB] Failed to load sqlite-vec via NPM:', e)
-      }
-
-      if (!loaded) {
-        // Try loading by name (if it's in PATH)
-        try {
-          db.loadExtension('vec0')
-          loaded = true
-          console.log('[DB] sqlite-vec loaded by name')
-        } catch {
-          console.warn('[DB] sqlite-vec not found — vector search will be unavailable.')
-        }
-      }
-
-      if (loaded) {
-        // Verify the extension works
-        const result = db.prepare("SELECT vec_version() as version").get() as { version: string }
-        console.log('[DB] sqlite-vec version:', result.version)
-      }
-    } catch (err) {
-      console.error('[DB] Failed to load sqlite-vec:', err)
-    }
   }
 
   /** Close the database connection (call on app quit) */

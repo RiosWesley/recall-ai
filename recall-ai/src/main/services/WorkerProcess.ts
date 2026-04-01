@@ -152,6 +152,55 @@ export class WorkerProcess {
     });
   }
 
+  /**
+   * Generates text via LLM and enforces valid JSON extraction with an aggressive retry loop.
+   * Useful since smaller parameter models like LFM2.5-350M can drift out of grammar.
+   */
+  /**
+   * Generates text via LLM and enforces valid JSON extraction with an aggressive retry loop.
+   * Useful since smaller parameter models like LFM2.5-350M can drift out of grammar.
+   */
+  async generateJson<T>(prompt: string, options?: GenerateOptions, maxRetries = 3): Promise<T> {
+    let lastError: any = null;
+    let currentPrompt = prompt;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const rawResponse = await this.generate(currentPrompt, options);
+        return this.extractJson<T>(rawResponse);
+      } catch (e: any) {
+        lastError = e;
+        console.warn(`[WorkerProcess] JSON extraction failed (attempt ${attempt}/${maxRetries}):`, e.message);
+        
+        // Feed the error back into the prompt to correct the model
+        currentPrompt = prompt + `\n\n[SYSTEM FEEDBACK: Your previous response failed JSON parsing with error: ${e.message}. Please return strictly valid JSON without conversational wrapper text.]`;
+      }
+    }
+
+    throw new Error(`[WorkerProcess] Failed to generate valid JSON after ${maxRetries} attempts. Last error: ${lastError?.message}`);
+  }
+
+  /**
+   * Helper to strip markdown (e.g. \`\`\`json) and aggressively find the { ... } boundaries.
+   */
+  private extractJson<T>(text: string): T {
+    // 1. Try direct parse first (optimistic)
+    try {
+      return JSON.parse(text);
+    } catch (_) { }
+
+    // 2. Strip markdown blocks if present
+    let cleaned = text.replace(/^```json/im, '').replace(/```$/im, '').trim();
+    
+    // 3. Regex boundary extraction: look for the first { and the last }
+    const match = cleaned.match(/\{.*\}/s) || cleaned.match(/\[.*\]/s);
+    if (!match) {
+      throw new Error("No JSON boundaries ({...} or [...]) found in response");
+    }
+
+    return JSON.parse(match[0]);
+  }
+
   private async processNextInQueue() {
     if (this.processingQueue || this.batchQueue.length === 0) return;
     this.processingQueue = true;

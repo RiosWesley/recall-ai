@@ -692,12 +692,12 @@ src/main/services/
 
 ---
 
-## [ ] TASK 3.4 — Ingestão Inteligente e Paralela (Sem Vector DB)
+## [x] TASK 3.4 — Ingestão Inteligente e Paralela (Sem Vector DB)
 
 **Objetivo:** Refatorar o parser e sistema anterior de chunking. Usar o Worker para gerar resumos de sessão e identificar entidades formatadas (JSON) que servirão de fundação para NLP factual. Eliminar qualquer persistência de modelo de embeddings/sqlite-vec.
 
 **Contexto (ULTRATHINK):**
-- Por anos a comunidade apostou em Embeddings gigantescos mas desprezou que texto coloquial BR-PT (gírias) falha em simetria semântica. 
+- Por anos a comunidade apostou em Embeddings gigantescos mas desprezado que texto coloquial BR-PT (gírias) falha em simetria semântica. 
 - Em vez de gerar vetores burros de blocos arbitrários, vamos focar em Topologia Temporal e Extração Estruturada ("Quem fez o que com quem em qual momento?").
 
 **Requisitos:**

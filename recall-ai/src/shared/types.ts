@@ -54,62 +54,44 @@ export interface NewMessage {
   raw?: string
 }
 
-// ─── CHUNK ───────────────────────────────────────────────────────────────────
+// ─── SESSIONS & ENTITIES ────────────────────────────────────────────────────
 
-export interface Chunk {
+export interface Session {
   id: string
   chat_id: string
-  content: string          // plain text for embedding
-  display_content: string  // formatted with names + timestamps
   start_time: number
   end_time: number
   message_count: number
-  token_count: number
-  participants: string[]   // parsed from JSON
+  summary: string
   created_at: number
 }
 
-export interface NewChunk {
+export interface NewSession {
   id?: string
   chat_id: string
-  content: string
-  display_content: string
   start_time: number
   end_time: number
-  message_count?: number
-  token_count?: number
-  participants?: string[]
+  message_count: number
+  summary: string
 }
 
-export interface NewParentChunk {
+export interface Entity {
   id: string
-  chat_id: string
-  content: string
-  display_content: string
-  start_time: number
-  end_time: number
-  message_count?: number
-  token_count?: number
-  participants?: string[]
+  session_id: string
+  name: string
+  normalized_name: string
+  type: string
+  action: string
+  created_at: number
 }
 
-export interface NewChildChunk {
-  id: string
-  parent_id: string
-  chat_id: string
-  content: string
-  display_content: string
-  start_time: number
-  end_time: number
-  message_count?: number
-  child_index: number
-}
-
-// ─── VECTOR ──────────────────────────────────────────────────────────────────
-
-export interface VectorResult {
-  chunk_id: string
-  distance: number
+export interface NewEntity {
+  id?: string
+  session_id: string
+  name: string
+  normalized_name: string
+  type: string
+  action: string
 }
 
 // ─── PROFILE FACT ─────────────────────────────────────────────────────────────

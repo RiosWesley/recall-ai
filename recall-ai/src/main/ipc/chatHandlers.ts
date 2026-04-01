@@ -8,8 +8,7 @@ import { ipcMain } from 'electron'
 import { DatabaseService } from '../db/database'
 import { ChatRepository } from '../db/repositories/ChatRepository'
 import { MessageRepository } from '../db/repositories/MessageRepository'
-import { ChunkRepository } from '../db/repositories/ChunkRepository'
-import { VectorRepository } from '../db/repositories/VectorRepository'
+import { SessionRepository } from '../db/repositories/SessionRepository'
 import type { Chat } from '../../shared/types'
 
 export function registerChatHandlers() {
@@ -25,12 +24,10 @@ export function registerChatHandlers() {
     // Delete in dependency order inside a transaction
     const deleteOp = db.transaction(() => {
       const msgRepo = new MessageRepository(db)
-      const chunkRepo = new ChunkRepository(db)
+      const sessionRepo = new SessionRepository(db)
       const chatRepo = new ChatRepository(db)
-      const vectorRepo = new VectorRepository(db)
 
-      vectorRepo.deleteByChatId(chatId)
-      chunkRepo.deleteByChatId(chatId)
+      sessionRepo.deleteByChatId(chatId)
       msgRepo.deleteByChatId(chatId)   // MessageRepository needs deleteByChatId — see below
       chatRepo.delete(chatId)
     })

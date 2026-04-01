@@ -3,6 +3,5 @@ export { runMigrations } from './migrations/001_initial'
 export {
   ChatRepository,
   MessageRepository,
-  ChunkRepository,
-  VectorRepository,
+  SessionRepository,
 } from './repositories'

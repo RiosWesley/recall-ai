@@ -54,10 +54,12 @@ export class SettingsService {
       setTimeout(async () => {
         console.log('[SettingsService] Critical backend setting changed. Disposing active models for cold-restart.')
         // Lazy import avoids circular dependency loops in ESM
-        const { LLMService } = await import('./LLMService')
+        const { WorkerProcess } = await import('./WorkerProcess')
+        const { BrainProcess } = await import('./BrainProcess')
         const { EmbeddingService } = await import('./EmbeddingService')
         
-        try { LLMService.getInstance().dispose() } catch(e){}
+        try { WorkerProcess.getInstance().dispose() } catch(e){}
+        try { BrainProcess.getInstance().dispose() } catch(e){}
         try { EmbeddingService.getInstance().dispose() } catch(e){}
       }, 0)
     }

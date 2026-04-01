@@ -1,7 +1,5 @@
 /**
- * Chunking module — public API.
+ * Chunking module (legacy name) — now handles Session grouping.
  */
 
-export { ChunkingEngine, DEFAULT_CHUNKING_CONFIG } from './ChunkingEngine'
-export { TimeWindowStrategy } from './strategies/TimeWindowStrategy'
-export type { ChunkingConfig, RawChunk } from './types'
+export { SessionEngine, type RawSession } from './SessionEngine'

@@ -2,10 +2,7 @@ import { BrainProcess } from './BrainProcess'
 import { promptTemplates } from './promptTemplates'
 import type { RAGOptions, RAGResponse, RAGLatency, SearchResult } from '../../shared/types'
 import { SettingsService } from './SettingsService'
-import { TemporalResolver } from './TemporalResolver'
-import { MultiQueryRetriever } from './MultiQueryRetriever'
-import { DatabaseService } from '../db/database'
-import { ContactProfileRepository } from '../db/repositories/ContactProfileRepository'
+import { SearchService } from './SearchService'
 
 export class RAGService {
   private static instance: RAGService | null = null
@@ -29,75 +26,22 @@ export class RAGService {
     let context: SearchResult[] = []
 
     try {
-      const profileRepo = new ContactProfileRepository(DatabaseService.getInstance())
-      const contactProfile = options?.chatId ? profileRepo.findByChatId(options.chatId) : null
       const config = SettingsService.getInstance().get()
 
       const searchStart = performance.now()
       
-      const temporalResolver = TemporalResolver.getInstance()
-      const temporal = await temporalResolver.resolve(question)
-      
-      let dateFrom: number | undefined
-      let dateTo: number | undefined
-      
-      if (temporal.has_temporal_filter && temporal.date_from && temporal.date_to) {
-        dateFrom = Math.floor(new Date(temporal.date_from).getTime() / 1000)
-        dateTo = Math.floor(new Date(temporal.date_to).getTime() / 1000)
-        if (temporal.date_from === temporal.date_to) {
-            dateTo += 86399 // end of day
-        }
-      }
-
-      const cleanQuestion = temporal.clean_question || question
-      
-      // If we have a robust profile and the user just asked a generic short question, skip vector database completely!
-      const isShortGeneric = cleanQuestion.split(' ').length < 6 && !temporal.has_temporal_filter
-      
-      if (contactProfile && isShortGeneric) {
-        context.push({
-          id: `profile-${contactProfile.id}`,
-          chatId: contactProfile.contact_id,
-          chatName: contactProfile.contact_name,
-          score: 1.0,
-          content: `PERFIL DA CONVERSA E FATOS GERAIS:\n${contactProfile.profile_text}`,
-          date: 'Análise Dossiê',
-          sender: '🤖 Sistema',
-          chunkId: contactProfile.id!
-        })
-      } else {
-        const multiQuery = MultiQueryRetriever.getInstance()
-        context = await multiQuery.retrieve(
-           cleanQuestion, 
-           config.topK, 
-           contactProfile?.contact_name || 'Desconhecido', 
-           options?.chatId, 
-           dateFrom, 
-           dateTo
-        )
-        
-        // Inject profile at the top if available to give LLM maximum situational awareness
-        if (contactProfile) {
-          context.unshift({
-            id: `profile-${contactProfile.id}`,
-            chatId: contactProfile.contact_id,
-            chatName: contactProfile.contact_name,
-            score: 1.0,
-            content: `PERFIL DA CONVERSA:\n${contactProfile.profile_text}`,
-            date: 'Análise Dossiê',
-            sender: '🤖 Sistema',
-            chunkId: contactProfile.id!
-          })
-        }
-      }
+      // Temporary fallback search call until Task 4.1 routing is complete
+      context = await SearchService.getInstance().search(question, { 
+        limit: config.topK, 
+        chatId: options?.chatId 
+      })
       
       latency.search = performance.now() - searchStart
 
-      // 3. Early return if no context is found
       if (context.length === 0) {
         latency.total = performance.now() - totalStart
         return {
-          answer: 'Não encontrei trechos de conversa relevantes para a sua pergunta.',
+          answer: 'Aguardando implementação da Fase 4.1 (Motor FTS5) para buscas completas.',
           context,
           tokensUsed: 0,
           latency
