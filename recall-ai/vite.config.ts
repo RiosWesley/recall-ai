@@ -13,7 +13,8 @@ export default defineConfig({
       main: {
         entry: {
           main: 'electron/main.ts',
-          'llm-worker': 'src/main/services/llm-worker.ts'
+          'worker-worker': 'src/main/services/worker-worker.ts',
+          'brain-worker': 'src/main/services/brain-worker.ts'
         },
         vite: {
           build: {

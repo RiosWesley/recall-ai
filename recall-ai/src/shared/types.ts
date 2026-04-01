@@ -202,7 +202,7 @@ export interface ImportResult {
 
 // ─── MODELS ──────────────────────────────────────────────────────────────────
 
-export type ModelKey = 'embedding' | 'llm'
+export type ModelKey = 'embedding' | 'worker' | 'brain' | 'worker_fallback'
 export type ModelPurpose = 'embedding' | 'generation'
 
 /**

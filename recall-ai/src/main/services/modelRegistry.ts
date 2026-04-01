@@ -9,7 +9,7 @@
  * making subsequent app starts faster (no network round-trip for path resolution).
  */
 
-export type ModelKey = 'embedding' | 'llm'
+export type ModelKey = 'embedding' | 'worker' | 'brain' | 'worker_fallback'
 
 export interface ModelEntry {
   /** Logical key used throughout the codebase */
@@ -30,47 +30,54 @@ export interface ModelEntry {
 
 export const MODEL_REGISTRY = {
   /**
-   * nomic-embed-text-v1.5 — Extremely capable Semantic Embedding Model, 768 dimensions.
-   *
-   * Replaces 'all-MiniLM' to provide an industry-leading context window (8192 tokens),
-   * ensuring massive monolithic text chunks never overflow the context.
-   * Superior multimodal and varied-context search recall.
-   * Size: ~80MB (Q4_K_M).
-   *
-   * Repo: nomic-ai/nomic-embed-text-v1.5-GGUF
+   * nomic-embed-text-v1.5
    */
   embedding: {
     key: 'embedding',
     name: 'nomic-embed-text-v1.5',
     uri: 'hf:nomic-ai/nomic-embed-text-v1.5-GGUF:Q4_K_M',
-    sizeEstimate: 80_000_000, // ~80MB
+    sizeEstimate: 80_000_000,
     purpose: 'embedding',
     dimensions: 768,
     quantization: 'Q4_K_M',
   },
 
   /**
-   * Gemma 3 270M IT — Instruction-tuned generative model.
-   *
-   * Q4_K_M strikes the optimal balance between inference speed and quality
-   * for a 270M parameter model. At this scale, quantization below Q4 becomes
-   * noticeably degraded; Q4_K_M maintains coherent output.
-   * Size: ~150MB
-   *
-   * Used in TASK 3.x (LLM service). Downloaded now so the user doesn't wait
-   * when they first use the chat feature.
-   *
-   * Repo: bartowski/google_gemma-3-270m-it-GGUF
+   * LFM2.5-350M - Worker Process for fast parsing and extraction
    */
-  llm: {
-    key: 'llm',
+  worker: {
+    key: 'worker',
+    name: 'LFM2.5 350M',
+    uri: 'hf:lmstudio-community/LFM2.5-350M-GGUF:Q4_K_M',
+    sizeEstimate: 200_000_000,
+    purpose: 'generation',
+    quantization: 'Q4_K_M',
+  },
+
+  /**
+   * Gemma 3 270M IT - Fallback Worker if LFM fails to load due to architecture
+   */
+  worker_fallback: {
+    key: 'worker_fallback',
     name: 'Gemma 3 270M IT',
     uri: 'hf:bartowski/google_gemma-3-270m-it-GGUF:Q4_K_M',
-    sizeEstimate: 150_000_000, // ~150MB
+    sizeEstimate: 150_000_000,
+    purpose: 'generation',
+    quantization: 'Q4_K_M',
+  },
+
+  /**
+   * Qwen 3.5 4B - Brain Process for synthesis
+   */
+  brain: {
+    key: 'brain',
+    name: 'Qwen 3.5 4B',
+    uri: 'hf:lmstudio-community/Qwen3.5-4B-GGUF:Q4_K_M',
+    sizeEstimate: 2_500_000_000, // ~2.5GB
     purpose: 'generation',
     quantization: 'Q4_K_M',
   },
 } as const satisfies Record<ModelKey, ModelEntry>
 
 /** All model keys in download-priority order (embedding first — needed sooner) */
-export const MODEL_DOWNLOAD_ORDER: ModelKey[] = ['embedding', 'llm']
+export const MODEL_DOWNLOAD_ORDER: ModelKey[] = ['embedding', 'worker', 'brain']

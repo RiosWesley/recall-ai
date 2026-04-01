@@ -21,4 +21,19 @@ export function registerRagHandlers(win: BrowserWindow) {
       throw error
     }
   })
+
+  ipcMain.handle('rag:status', async () => {
+    const { BrainProcess } = await import('../services/BrainProcess')
+    const { WorkerProcess } = await import('../services/WorkerProcess')
+    
+    return {
+      brain: {
+        ready: BrainProcess.getInstance().isReady()
+      },
+      worker: {
+        ready: WorkerProcess.getInstance().isReady(),
+        fallback: WorkerProcess.getInstance().getFallbackStatus()
+      }
+    }
+  })
 }

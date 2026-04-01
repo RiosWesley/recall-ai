@@ -1,4 +1,4 @@
-import { LLMService } from './LLMService'
+import { BrainProcess } from './BrainProcess'
 import { promptTemplates } from './promptTemplates'
 import type { RAGOptions, RAGResponse, RAGLatency, SearchResult } from '../../shared/types'
 import { SettingsService } from './SettingsService'
@@ -110,15 +110,15 @@ export class RAGService {
 
       // 5. Generation
       const generationStart = performance.now()
-      const llmService = LLMService.getInstance()
+      const brainProcess = BrainProcess.getInstance()
       
       let answer = ''
       let tokensUsed = 0
 
       try {
-        answer = await llmService.generateStream(
+        answer = await brainProcess.generateStream(
           userPrompt,
-          (token) => {
+          (token: string) => {
             tokensUsed++
             if (onToken) onToken(token)
           },
@@ -129,8 +129,8 @@ export class RAGService {
           }
         )
       } catch (llmError) {
-        console.error('[RAGService] Error generating response from LLM:', llmError)
-        answer = 'Desculpe, ocorreu um erro ao gerar a resposta ou o LLM falhou.\n\nContexto encontrado:' + 
+        console.error('[RAGService] Error generating response from BrainProcess:', llmError)
+        answer = 'Desculpe, ocorreu um erro ao gerar a resposta ou a IA falhou.\n\nContexto encontrado:' + 
                  context.map((c, i) => `\n[${i+1}] ${c.date} ${c.sender}: ${c.content}`).join('')
       }
       

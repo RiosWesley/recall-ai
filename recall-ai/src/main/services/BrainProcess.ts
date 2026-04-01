@@ -4,8 +4,6 @@ import { fileURLToPath } from 'node:url';
 import { nanoid } from 'nanoid';
 import { ModelManager } from './ModelManager';
 import { MODEL_REGISTRY } from './modelRegistry';
-import { SettingsService } from './SettingsService';
-import fs from 'node:fs';
 
 const _dirname = typeof __dirname !== 'undefined'
   ? __dirname
@@ -24,8 +22,8 @@ export interface ModelInfo {
   parameters: string;
 }
 
-export class LLMService {
-  private static instance: LLMService | null = null;
+export class BrainProcess {
+  private static instance: BrainProcess | null = null;
   
   private worker: UtilityProcess | null = null;
   private pendingRequests: Map<string, { resolve: Function, reject: Function, onToken?: Function }> = new Map();
@@ -34,11 +32,11 @@ export class LLMService {
 
   private constructor() {}
 
-  static getInstance(): LLMService {
-    if (!LLMService.instance) {
-      LLMService.instance = new LLMService();
+  static getInstance(): BrainProcess {
+    if (!BrainProcess.instance) {
+      BrainProcess.instance = new BrainProcess();
     }
-    return LLMService.instance;
+    return BrainProcess.instance;
   }
 
   async initialize(): Promise<void> {
@@ -47,35 +45,31 @@ export class LLMService {
 
     this.initializationPromise = new Promise(async (resolve, reject) => {
       try {
-        console.log('[LLMService] Resolving LLM model path...');
-        const customPath = SettingsService.getInstance().get().customLlmPath;
-        let modelPath = customPath && fs.existsSync(customPath) 
-          ? customPath 
-          : await ModelManager.getInstance().resolve('llm');
+        console.log('[BrainProcess] Resolving Brain model path...');
+        const modelPath = await ModelManager.getInstance().resolve('brain');
 
-        console.log('[LLMService] Forking Utility Process...');
+        console.log('[BrainProcess] Forking Utility Process...');
         
-        // Onde o llm-worker.js também reside, pois adicionamos no rollupOptions
-        const workerPath = path.join(_dirname, 'llm-worker.js');
+        const workerPath = path.join(_dirname, 'brain-worker.js');
         
         this.worker = utilityProcess.fork(workerPath, [], {
-          stdio: 'inherit' // Permite ler a stdout/stderr do child process no terminal
+          stdio: 'inherit'
         });
 
         this.worker.on('message', (msg: any) => this.handleWorkerMessage(msg));
         
         this.worker.on('exit', (code) => {
-          console.warn(`[LLMService] Utility process exited with code ${code}`);
+          console.warn(`[BrainProcess] Utility process exited with code ${code}`);
           this.ready = false;
           this.worker = null;
-          this.rejectAllPending(new Error(`LLM Worker exited unexpectedly with code ${code}`));
+          this.rejectAllPending(new Error(`Brain Worker exited unexpectedly with code ${code}`));
         });
 
         const id = nanoid();
         
         this.pendingRequests.set(id, {
           resolve: () => {
-            console.log('[LLMService] Utility Process initialized successfully.');
+            console.log('[BrainProcess] Utility Process initialized successfully.');
             this.ready = true;
             resolve();
           },
@@ -89,7 +83,7 @@ export class LLMService {
         });
 
       } catch (err) {
-        console.error('[LLMService] Failed to initialize:', err);
+        console.error('[BrainProcess] Failed to initialize:', err);
         this.initializationPromise = null;
         reject(err);
       }
@@ -133,18 +127,17 @@ export class LLMService {
 
   getModelInfo(): ModelInfo {
     return {
-      modelName: MODEL_REGISTRY.llm.name,
-      parameters: '270M'
+      modelName: MODEL_REGISTRY.brain.name,
+      parameters: '4B'
     };
   }
 
   async dispose(): Promise<void> {
     if (!this.worker) return;
 
-    console.log('[LLMService] Disposing worker...');
+    console.log('[BrainProcess] Disposing worker...');
     this.worker.postMessage({ type: 'dispose' });
     
-    // Aguardar no máximo 2 segundos para graceful shutdown
     await new Promise<void>(resolve => {
       const timeout = setTimeout(() => {
         if (this.worker) this.worker.kill();
@@ -159,7 +152,7 @@ export class LLMService {
 
     this.worker = null;
     this.ready = false;
-    this.rejectAllPending(new Error('LLMService is disposing or shutting down'));
+    this.rejectAllPending(new Error('BrainProcess is disposing or shutting down'));
     this.initializationPromise = null;
   }
 
@@ -168,7 +161,7 @@ export class LLMService {
 
     if (!id || !this.pendingRequests.has(id)) {
       if (type === 'error') {
-        console.error(`[LLMWorker Global Error]`, error);
+        console.error(`[BrainWorker Global Error]`, error);
       }
       return;
     }
@@ -192,7 +185,7 @@ export class LLMService {
         reject(new Error(error));
         break;
       default:
-        console.warn(`[LLMWorker] Unrecognized message type '${type}'`);
+        console.warn(`[BrainWorker] Unrecognized message type '${type}'`);
     }
   }
 

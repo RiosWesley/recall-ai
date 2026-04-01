@@ -662,354 +662,155 @@ interface RAGResponse {
 
 ---
 
-## [x] TASK 3.3 — Chat UI Funcional (RAG Streaming)
+## [x] TASK 3.3 — Orquestração Multi-Modelo (Dual Utility Processes)
 
-**Objetivo:** Conectar a tela de Chat ao RAG com streaming de tokens. User faz pergunta → resposta aparece token por token.
+**Objetivo:** Implementar a nova arquitetura dual-model: Worker (LFM2.5-350M, residente) para tarefas rápidas em lote e Brain (Qwen3.5-3B, sob demanda) para síntese e contexto.
 
-**Depende de:** TASK 3.2 ✅
+**Contexto (ULTRATHINK):**
+- **Arquitetura (Decoupled Intelligence):** O LFM2.5 é o estivador paralelo. Lê, extrai e anota em JSON com altíssimo throughput. O Qwen3.5-3B é quem consolida. 350M de parâmetros não comportam gramática rica e raciocínio multi-step; precisamos separar o motor de parsing do motor de síntese.
+- **Eficiência de VRAM (Target < 3GB):** Reter o Worker permanentemente não custa nada (~200MB de RAM), mas mantém latência zero nas queries atômicas contínuas. Carregar o Brain de forma diferida (apenas no primeiro chat de cada sessão do usuário) poupa ~2GB de VRAM e previne freezes totais de sistema em placas antigas.
+- **Runtime Check:** Precisamos validar compatibilidade GGUF com o modelo híbrido / state-space do LFM2.5. O utilitário necessita reagir e degradar caso incompatível.
 
-**Contexto:**
-- `Chat.tsx` já tem UI de chat (8.7KB) — com mock data e streaming simulado
-- Precisa receber tokens reais via IPC events
-- Mostrar citations (chunks fonte) abaixo da resposta
-
-**Arquivos a modificar:**
-- `src/pages/Chat.tsx` → Conectar ao IPC real
-- `electron/preload.ts` → Adicionar `askRAG()`, `onRAGToken()`, `onRAGDone()`
-
-**API `window.api`** (adicionar):
-```typescript
-askRAG(question: string, options?: RAGOptions): Promise<void>
-onRAGToken(cb: (token: string) => void): void
-onRAGDone(cb: (response: RAGResponse) => void): void
+**Arquivos a criar/modificar:**
+```
+src/main/services/
+├── ModelRegistry.ts       → Novo centralizador para downloads. Deve contemplar arquivos de 350M e 3B.
+├── WorkerProcess.ts       → Utility Process dedicado ao LFM2.5-350M. Habilita batch queue.
+└── BrainProcess.ts        → Utility Process dedicado ao Qwen3.5-3B. Suporta lazy-load.
 ```
 
-**Comportamento esperado:**
-1. User digita pergunta e envia
-2. Estado muda para "thinking" (indicador visual)
-3. Tokens começam a aparecer um a um (streaming)
-4. Ao finalizar: resposta completa + citations + latency info
-5. Scroll automático acompanha novos tokens
+**Requisitos:**
+1. **Validação do Runtime (Dia 0):** Script atômico para validar inferência básica do LFM2.5 GGUF. Em colapso, utilizar outro LLM em torno de 0.5B a 1B como fallback automático sem refatorar a UI.
+2. **Ciclo de Vida Independente:** A falha (Crash OOM) do Brain não deve corromper o processo contínuo de Ingestão provida pelo Worker.
+3. **Interface de Streaming Dinâmica:** Comunicação IPC e MessagePorts dedicados para não engargar os pipes principais.
 
 **Critérios de aceitação:**
-- [x] Digitar pergunta → resposta da IA aparece com streaming
-- [x] Tokens aparecem suavemente (sem flash/flicker)
-- [x] Citations (chunks fonte) exibidos após resposta
-- [x] Indicador de "pensando" enquanto IA processa
-- [x] Latency metrics exibidas (tempo de busca + geração)
-- [x] Funciona sem LLM (fallback: mostra chunks encontrados)
-- [x] Zero dados mockados na Chat page
-- [x] Scroll acompanha tokens novos
+- [ ] Instanciação simultânea de ambos os processos não conflita nos adapters de GPU.
+- [ ] Carregamento limpo do Worker no Startup < 1.0s.
+- [ ] Alocação lazy-loaded do Brain reporta status de carregamento e tempo corretamente pro front.
+- [ ] Degradação gracefully tratada no frontend se Memória falhar.
 
 ---
 
-## [ ] TASK 3.4 — Home Page Funcional
+## [ ] TASK 3.4 — Ingestão Inteligente e Paralela (Sem Vector DB)
 
-**Objetivo:** Conectar a Home page a dados reais — stats, memórias recentes, pessoas em destaque.
+**Objetivo:** Refatorar o parser e sistema anterior de chunking. Usar o Worker para gerar resumos de sessão e identificar entidades formatadas (JSON) que servirão de fundação para NLP factual. Eliminar qualquer persistência de modelo de embeddings/sqlite-vec.
 
-**Depende de:** TASK 1.4 ✅, TASK 2.5 ✅
+**Contexto (ULTRATHINK):**
+- Por anos a comunidade apostou em Embeddings gigantescos mas desprezou que texto coloquial BR-PT (gírias) falha em simetria semântica. 
+- Em vez de gerar vetores burros de blocos arbitrários, vamos focar em Topologia Temporal e Extração Estruturada ("Quem fez o que com quem em qual momento?").
 
-**Contexto:**
-- `Home.tsx` tem mock data completo (HAS_DATA toggle)
-- Precisa: stats reais do DB, últimas buscas, pessoas com mais mensagens
-
-**Arquivos a modificar:**
-- `src/pages/Home.tsx` → Substituir mock data por chamadas IPC
-
-**IPC handlers necessários:**
-- `stats:get` → { totalPersons, totalChats, totalMessages, lastSearchQuery }
-- `stats:recentMemories` → últimos chunks visualizados/buscados
-- `stats:featuredPeople` → top 3 pessoas por message_count
+**Requisitos:**
+1. **Quebra Temporal (Sessões):** Substituir janela de tempo rígida de tokens por Gap Cronológico (> 2 horas inativos = Nova Sessão).
+2. **Worker Batch Pipeline:** Implementar API queue de lotes (6-8 sessões por batch) para extração massivamente paralela.
+3. **Extração JSON (Strict Mode):** O prompt enviado para o LFM2.5-350M exigirá obrigatoriamente Formato JSON validado regex. Coletar: `summary` genérico da sessão e `entities` detalhadas (entidade, nome normalizado, tipo, intenção/ação do usuário).
+4. **Agregação Pós-Ingestão (Levenshtein LLM):** No término da timeline, agrupar variações e utilizar o Worker para normalização linguística rápida final das tags cadastradas ("LoL" e "League" -> "league of legends").
+5. **Drop do VecDB:** Remover as chamadas do sqlite-vec do schema e dos DAOs originais. Simplificar o SQLite com foco em FTS5 agressivo nas colunas textuais.
 
 **Critérios de aceitação:**
-- [ ] Stats refletem dados reais do DB
-- [ ] Empty state aparece quando não há chats importados
-- [ ] Pessoas em destaque vêm do DB (top 3 por msgs)
-- [ ] Memórias recentes vêm do search_history
-- [ ] Zero dados mockados
-
-**🏁 MILESTONE: MVP 2 — IA Desktop Funcional**
+- [ ] Agrupamento por sessões obedece à lógica natural da inatividade de envio.
+- [ ] Pipeline extrai resumos coesos em JSON consistente (100% de parse sem crash).
+- [ ] Concorrência via batch processing gera velocidade máxima; logs exibem sessões/sec em avanço na GUI.
+- [ ] Tabelas atualizadas preenchendo as colunas formatadas adequadamente.
 
 ---
 
-# FASE 4 — POLISH & FEATURES
+# FASE 4 — MOTOR DE BUSCA DETERMINÍSTICO E SÍNTESE DO BRAIN
 
-> **Meta:** Qualidade de produção, features diferenciadores, state management.
+> **Meta:** Otimizar a pipeline RAG, abandonando Loops Cognitivos / LLM Agents e substituindo por um Pipeline Determinístico (Query Extractor FTS5 + Brain Synthesis).
 
 ---
 
-## [ ] TASK 4.1 — People Graph Engine + UI
+## [ ] TASK 4.1 — Routing Algorítmico do Motor de Busca (Sem LLM)
 
-**Objetivo:** Implementar a extração de pessoas (sender-based), relações por co-occurrence, e conectar à tela People.
+**Objetivo:** Definir as lógicas de retrieval FTS5 nativo. Criar caminhos de pesquisa independentes orientados à intenção de usuário, substituindo o KNN Híbrido obsoleto.
 
-**Depende de:** TASK 1.4 ✅
+**Contexto (ULTRATHINK):**
+- Minimizar "Ruído Cinza" na query factual. Um input buscando "refeição hamburguer" não precisa bater KNN, necessita apenas Expandir o contexto se encontrou um hit factual no SQLite em FTS5. Isso mantém o contexto para a Brain limpo e exato.
 
-**Contexto:**
-- Schema já definido no ARCHITECTURE.md seção 3.6: `persons`, `person_relations`, `key_memories`
-- v1.0 usa extração sender-based (sem NER por LLM — isso é v1.3)
-- `People.tsx` já tem UI completa (30KB!) com grafo SVG e painel de perfil — tudo mockado
-- Deduplicação de aliases por Levenshtein distance ≤ 2
-
-**Arquivos a criar:**
-```
-src/main/services/PeopleService.ts     → Extrai, deduplica, relaciona pessoas
-src/main/db/repositories/PersonRepository.ts
-src/main/ipc/peopleHandlers.ts
-```
-
-**Tabelas a adicionar no schema (migration 002):**
-```sql
-CREATE TABLE persons (id, name, aliases, photo_path, bio, tags, msg_count, first_seen, last_seen, chats)
-CREATE TABLE person_relations (id, person_a_id, person_b_id, chat_id, co_occurrence_count, strength)
-CREATE TABLE key_memories (id, person_id, chunk_id, content, relevance_score, timestamp)
-```
-
-**Pipeline:**
-1. Na importação de chat, extrair senders únicos
-2. Normalizar nomes (trim, capitalização)
-3. Deduplicar aliases (Levenshtein ≤ 2)
-4. Criar relações entre pessoas do mesmo chat
-5. Calcular strength por co-occurrence dentro de chunks
-
-**IPC handlers:**
-- `persons:list` → todas as pessoas
-- `persons:get(id)` → detalhe com foto, bio, tags, memórias
-- `persons:relations` → todas as relações (para o grafo)
-- `persons:updatePhoto(id, path)` → anexar foto
-- `persons:updateBio(id, bio)` → editar bio
-- `persons:updateTags(id, tags)` → editar tags
+**Requisitos:**
+1. **Classificador Cognitivo (Worker Call):** Um prompt atômico pedindo ao 350M a classificação da pergunta: `factual | aggregation | narrative`, extraindo também Keywords nativas e o Tense (Tempo do evento).
+2. **Pipeline Tripla de Busca (Algorítmica, 0 LLM):**
+   - *Factual*: FTS5 clássico expandido via "*Sliding Window*". Se acha hit, engolir as +/- 15 mensagens subsequentes para injetar o fluxo local da conversa. Top 5 Janelas.
+   - *Aggregations*: Queries puras na tabela de Entities via `COUNT` / `GROUP BY`.
+   - *Narrative*: Retornar `summaries` de sessões completas, filtradas pelos limites de data isolados pelo Classificador.
+3. **Context Bridging:** Montar pacote imutável e estruturado consolidado das buscas listadas para injeção final.
 
 **Critérios de aceitação:**
-- [ ] Importar chat cria pessoas automaticamente
-- [ ] Pessoas deduplicadas (variações de nome agrupadas)
-- [ ] Relações calculadas por co-occurrence
-- [ ] Tela People mostra grafo real com dados do DB
-- [ ] Painel de perfil funciona (foto, bio, tags, memórias-chave)
-- [ ] Upload de foto local via diálogo Electron
-- [ ] Zero dados mockados na People page
+- [ ] Worker extrai Data, Intenção temporal e Keywords coesas.
+- [ ] Resposta dos algoritmos FTS/SQL deve levar < 25ms.
+- [ ] Context Bridging produz documento legível sem hallucination e com rastreabilidade forte do registro ID do DB.
 
 ---
 
-## [ ] TASK 4.2 — State Management (Zustand + TanStack Query)
+## [ ] TASK 4.2 — Brain Synthesis & Refinamento Opcional
 
-**Objetivo:** Implementar state management global com Zustand para estado local + TanStack Query para async/cache de dados do IPC.
+**Objetivo:** Sintetizar e formatar o Pacote Contextual via Qwen3.5-3B. Processar expansão lexical em caso de falha inicial da pesquisa originária.
 
-**Depende de:** TASK 2.5 ✅, TASK 3.3 ✅
+**Contexto (ULTRATHINK):**
+- A Brain receberá uma "Receita Exata" nas instruções: 'Basear-se EXATAMENTE nas datas x e y providenciadas no prompt'. Isso suprime alucinação do LLM.
+- Não usar loops gigantescos "Think -> Do -> Think". Se FTS falhou, a LLM recua, o Worker gera variações (ex: "cs, csgo, conter strike") e o sistema faz UM (1) novo FTS retry. Se esgotou, declara "dados inexistentes" e preserva UX e GPU.
 
-**Contexto:**
-- Zustand e TanStack Query já instalados — não utilizados
-- Estado atualmente é local com useState em cada page
-- React Router instalado (v7) — não utilizado (routing é state-based)
-
-**Arquivos a criar:**
-```
-src/store/
-├── useAppStore.ts        → Zustand: theme, currentPage, activeChatId, sidebarState
-├── useChatStore.ts       → Zustand: selectedChat, chatFilters
-└── useSearchStore.ts     → Zustand: lastQuery, searchHistory local
-
-src/hooks/
-├── useChats.ts           → TanStack Query: fetch/cache chats list
-├── useSearch.ts          → TanStack Query: search with cache
-├── useImport.ts          → TanStack Query mutation: import chat
-├── useStats.ts           → TanStack Query: home page stats
-└── usePersons.ts         → TanStack Query: people data
-```
-
-**Arquivos a modificar:**
-- `src/App.tsx` → Migrar de useState para Zustand + adicionar QueryClientProvider
-- Todas as pages → usar hooks em vez de props drilling
-
-**Benefícios:**
-- Cache automático de queries (não re-fetch se dados frescos)
-- Loading/error states consistentes
-- Invalidação automática (importar chat → sidebar atualiza)
-- Navegação via store (sem prop drilling de `navigate`)
+**Requisitos:**
+1. **Brain Injection:** Despachar o pacote validado ao Qwen3.5-3B configurado para baixa `temperature`.
+2. **Token Streaming SSE:** Encaminhar imediatamente cada Output Character para renderização na Web, criando Percepção de Altíssima Velocidade.
+3. **Fallback Worker (Gíria BR Expansion):** Em casos onde Brain falhou na agregação por keyword errada, demandar uma expansão FTS rápida (via 350M Worker) usando dialeto de chat pt-BR moderno. Reenviar FTS.
 
 **Critérios de aceitação:**
-- [ ] Zustand stores criados e funcionando
-- [ ] TanStack Query wrapping todas as chamadas IPC
-- [ ] QueryClient configurado com staleTime razoável
-- [ ] Invalidação: importar chat → sidebar refresh automático
-- [ ] Loading states via `isLoading` de TanStack Query
-- [ ] Error states via `isError` de TanStack Query
-- [ ] `navigate` via store (sem props)
-- [ ] Zero prop drilling de `navigate` entre pages
+- [ ] Prompt de Síntese retorna texto excelente, focado e que menciona datas originárias.
+- [ ] Refinamento lexical de fato tenta até 2 loops limitados antes de abortar de forma elegante.
 
 ---
 
-## [ ] TASK 4.3 — UI Polish (Framer Motion + React Router + Onboarding)
+# FASE 5 — INTERFACE REATIVA (TRUST BY DESIGN)
 
-**Objetivo:** Upgrade final de UX: animações com Framer Motion, routing com React Router, keyboard shortcuts, onboarding flow.
+> **Meta:** Fechamento e Polimento voltados a Transparência e Percepção Operacional. Sem UI complexa de roteamento, porém com imersão alta na janela Citações visuais.
 
-**Depende de:** TASK 4.2 ✅
+---
 
-**Contexto:**
-- Framer Motion instalado — não utilizado
-- React Router instalado — não utilizado (routing é state-based via App.tsx)
-- Keyboard shortcuts planejados: Ctrl+K (search), Ctrl+I (import)
-- Onboarding: first-run wizard que guia o user pelo primeiro import
+## [ ] TASK 5.1 — Chat Interativo e Expanded Citations 
 
-**Mudanças:**
+**Objetivo:** Renovar o layout Frontend (App.tsx / Chat.tsx) focando em Transparência Operacional — Evidenciar como a Engine buscou.
 
-1. **React Router:**
-   - Migrar de `switch/case` em App.tsx para `<Routes>`
-   - Routes: `/`, `/import`, `/search`, `/chat/:id`, `/people`, `/settings`
-   - Manter layout com Sidebar + TitleBar como wrapper
+**Contexto (ULTRATHINK):**
+- Um AI "Caixa Preta" assusta. Mostar diretamente do log importado o pedaço "sujo" que o AI consumiu faz o Cérebro do Usuário perdoar erros e confiar no acerto. O componente de citações é o Core Value Pŕoposition do front.
 
-2. **Framer Motion:**
-   - Page transitions (`AnimatePresence` + motion variants)
-   - Sidebar hover/active states
-   - Search results fade-in staggered
-   - Streaming text character animation
-   - Stat cards entrance animation (substituir CSS keyframes)
-
-3. **Keyboard Shortcuts:**
-   - `Ctrl+K` → Focus search
-   - `Ctrl+I` → Open import
-   - `Ctrl+,` → Settings
-   - `Escape` → Close modals/go back
-
-4. **Onboarding Flow:**
-   - Detectar first-run (nenhum chat importado + modelos não baixados)
-   - Step 1: Boas-vindas + explicação
-   - Step 2: Download de modelos (com progress)
-   - Step 3: Importar primeiro chat
-   - Step 4: Fazer primeira busca
-
-5. **Settings Page funcional:**
-   - Conectar ao IPC real
-   - Tema (light/dark/system)
-   - GPU backend (auto/cuda/metal/vulkan/cpu)
-   - Modelo LLM path customizado
-   - Limpar cache / deletar dados
+**Requisitos:**
+1. **Accordion de Transparência:** No painel da Chat Response, listar as Fontes Originais via componente dropdown animado via Framer Motion. Usuário visualiza o *Sliding Window* bruto recuperado do DB em tempo real.
+2. **Loading States Aprimorados:** Mensagem no frontend explicitando as etapas do fluxo determinístico: "Modelos Hibernando...", "Ligando Qwen...", "Gerando Síntese", "Aguardando GPU...".
+3. **Injeção de Metadados UI:** Aplicar filtros por Sidebar e barra temporal no container principal.
 
 **Critérios de aceitação:**
-- [ ] React Router com URLs corretas
-- [ ] Page transitions suaves com Framer Motion
-- [ ] Keyboard shortcuts funcionando
-- [ ] Onboarding flow completo para primeiro uso
-- [ ] Settings funcional (tema persiste, GPU config salva)
-- [ ] CSS keyframes substituídos por Framer Motion onde aplicável
-- [ ] Nenhuma animação causa jank/stutter
+- [ ] Usuário capaz de checar exatamente qual arquivo/linha gerou a síntese no accordeon.
+- [ ] Fluxo de texto por SSE do LLM roda limpo.
+- [ ] Erros de GPU (Crash RAM) disparam um Modal ou Toast visual.
 
 ---
 
-# FASE 5 — SHIP
+## [ ] TASK 5.2 — Dashboard Import Pipeline (Batch GUI)
 
-> **Meta:** App pronto para distribuição. Installers, auto-update, testes.
+**Objetivo:** Remodelar a Sidebar e o Upload Handler lidando com o Worker Extract.
 
----
-
-## [ ] TASK 5.1 — Testes & Quality Assurance
-
-**Objetivo:** Garantir qualidade mínima para release: testes unitários, testes de integração, fix de bugs.
-
-**Depende de:** Todas as tasks anteriores ✅
-
-**Escopo de testes:**
-
-1. **Parser** — Testes unitários com fixtures de cada formato WhatsApp
-2. **Chunking** — Validar janela de tempo, limite de tokens, overlap
-3. **Repositories** — CRUD com DB real (in-memory SQLite para tests)
-4. **EmbeddingService** — Validar dimensões, normalização
-5. **SearchService** — Validar relevância (queries de teste com resultados esperados)
-6. **RAGService** — E2E: pergunta → resposta (smoke test)
-7. **IPC** — Verificar que todos os handlers respondem corretamente
-
-**Setup de testes:**
-```
-npm install -D vitest
-```
+**Requisitos:**
+1. Tratar barra de upload detalhando: Passo FTS Indexing > Passo Batch Summarries > Passo Entity Resolving.
+2. Permitir que o Chat seja explorado mesmo que as entidades finais (Passo 5) não tenham terminado de rodar.
 
 **Critérios de aceitação:**
-- [ ] Parser: 100% dos formatos testados
-- [ ] Chunking: edge cases cobertos (arquivo vazio, 1 msg, 100k msgs)
-- [ ] Repositories: CRUD testado
-- [ ] Search: queries de relevância passam
-- [ ] Zero crashes em uso normal
-- [ ] Memória dentro do budget (~600MB total)
+- [ ] Resposta visual ágil as tarefas parciais salvas pelas transações do DB.
 
 ---
 
-## [ ] TASK 5.2 — Packaging & Installers
+## [ ] TASK 5.3 — Packaging Final (Tauri / Build Flags)
 
-**Objetivo:** Empacotar o app com electron-builder para distribuição: .exe (Windows), .dmg (macOS), .AppImage (Linux).
+**Objetivo:** Fechar dependências e rodar pipelines de empacotamento com atenção na separação de Utility Processes.
 
-**Depende de:** TASK 5.1 ✅
-
-**Contexto:**
-- `electron-builder.json5` já existe
-- `electron-builder` já instalado como devDependency
-- Config precisa lidar com módulos nativos (better-sqlite3, node-llama-cpp)
-
-**Configuração principal:**
-- NSIS installer para Windows
-- DMG para macOS (Universal binary se possível)
-- AppImage + deb para Linux
-- Excluir models/ do bundle (baixados no first-run)
-- Assinatura de código (opcional, mas recomendado)
-
-**electron-builder.json5 a ajustar:**
-```json5
-{
-  appId: "com.recall-ai.desktop",
-  productName: "Recall.ai",
-  directories: { output: "release" },
-  files: ["dist/**/*", "dist-electron/**/*"],
-  extraResources: [
-    { from: "node_modules/better-sqlite3/build", to: "native/better-sqlite3" },
-    // sqlite-vec e node-llama-cpp binaries
-  ],
-  win: { target: "nsis", icon: "build/icon.ico" },
-  mac: { target: "dmg", icon: "build/icon.icns" },
-  linux: { target: ["AppImage", "deb"], icon: "build/icon.png" },
-}
-```
+**Requisitos:**
+1. Tratamento robusto para os binários associados do `node-llama-cpp`. 
+2. Retirar resquícios do `sqlite-vec` nos package configuration.
+3. Teste em máquina clean (Onde Models Download e Caches são ativados no Boot1).
 
 **Critérios de aceitação:**
-- [ ] `npm run build` gera installer para o OS atual
-- [ ] Installer funciona (install → open → app roda)
-- [ ] Módulos nativos funcionam no app empacotado
-- [ ] Tamanho do installer < 150MB (sem modelos)
-- [ ] Ícone do app aparece corretamente
-- [ ] Desinstalar remove dados (ou pergunta)
-
----
-
-## [ ] TASK 5.3 — Auto-Updater + Assets Finais
-
-**Objetivo:** Configurar auto-update via GitHub Releases e criar assets finais (ícone, splash screen).
-
-**Depende de:** TASK 5.2 ✅
-
-**Contexto:**
-- Usar `electron-updater` (já referenciado na TECH_SPEC)
-- Updates via GitHub Releases (pode ser private repo)
-- Assets: ícone de app, splash screen, screenshots para store
-
-**Configuração:**
-```typescript
-import { autoUpdater } from 'electron-updater'
-
-autoUpdater.checkForUpdatesAndNotify()
-autoUpdater.on('update-available', () => { /* notify UI */ })
-autoUpdater.on('update-downloaded', () => { /* prompt restart */ })
-```
-
-**Assets necessários:**
-- Ícone: 1024x1024 PNG → gerar .ico (Windows), .icns (macOS)
-- Tray icon: 16x16 e 32x32 (mono para macOS)
-- Splash screen: design minimalista com logo + loading
-
-**Critérios de aceitação:**
-- [ ] Auto-updater configurado e conectado ao GitHub Releases
-- [ ] Notificação de update disponível na UI
-- [ ] Download de update em background
-- [ ] Prompt para restart após download
-- [ ] Ícone do app em todos os formatos
-- [ ] Tray icon funcional
-- [ ] README final atualizado com screenshots
+- [ ] App Installer gera Binário completo com os Utility Modules íntegros.
 
 ---
 
@@ -1017,14 +818,14 @@ autoUpdater.on('update-downloaded', () => { /* prompt restart */ })
 
 | Fase | Tasks | Concluídas | Status |
 |------|-------|-----------|--------|
-| **Fase 1** — Database & Parser | 4 | 3 | 🟡 Em andamento |
-| **Fase 2** — Embedding & Search | 5 | 0 | ⬜ Não iniciada |
-| **Fase 3** — LLM & RAG | 4 | 0 | ⬜ Não iniciada |
-| **Fase 4** — Polish & Features | 3 | 0 | ⬜ Não iniciada |
-| **Fase 5** — Ship | 3 | 0 | ⬜ Não iniciada |
-| **TOTAL** | **19** | **0** | **0%** |
+| **Fase 1** — Database & Parser | 4 | 4 | ✅ Concluída |
+| **Fase 2** — Model Download Services | 5 | 5 | ✅ Concluída |
+| **Fase 3** — Dual-Model Architecture | 4 | 2 | 🟡 Em andamento (Worker Pending) |
+| **Fase 4** — Deterministic Pipeline | 2 | 0 | ⬜ Não iniciada |
+| **Fase 5** — Interactive Interface & QA | 3 | 0 | ⬜ Não iniciada |
+| **TOTAL** | **18** | **11** | **61%** |
 
 **Milestones:**
-- [ ] **MVP 1** (após TASK 2.5) — Busca Semântica Funcional
-- [ ] **MVP 2** (após TASK 3.4) — IA Desktop Funcional
-- [ ] **v1.0** (após TASK 5.3) — Release
+- [x] **MVP 1** — Pipeline de Storage Básico Funcional
+- [ ] **MVP 2** (após TASK 4.2) — Orquestração de Síntese sem Vector DB
+- [ ] **v1.0** (após TASK 5.3) — UI Reativa com Transparência de Hit
