@@ -73,4 +73,56 @@ export class MessageRepository {
   deleteByChatId(chatId: string): void {
     this.db.prepare('DELETE FROM messages WHERE chat_id = ?').run(chatId)
   }
+
+  /**
+   * Factual Search (Task 4.1): Uses FTS5 to find matches and extracts a
+   * sliding window of surrounding messages (+/- windowSize).
+   */
+  searchFactual(keywords: string[], windowSize = 15, limit = 5): Message[][] {
+    if (!keywords || keywords.length === 0) return []
+    
+    // Build OR query for keywords. We can also use AND if they are meant to be exact.
+    // For general robustness, we prefix match each token avoiding syntax errors.
+    const cleanTokens = keywords.map(k => k.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, '').trim()).filter(Boolean)
+    if (cleanTokens.length === 0) return []
+    const matchQuery = cleanTokens.map(k => `"${k}"*`).join(' OR ')
+    
+    // 1. Find the pivot points
+    const pivots = this.db.prepare(`
+      SELECT m.id, m.chat_id, m.timestamp 
+      FROM messages_fts fts
+      JOIN messages m ON fts.message_id = m.id
+      WHERE messages_fts MATCH ?
+      ORDER BY fts.rank
+      LIMIT ?
+    `).all(matchQuery, limit) as { id: string, chat_id: string, timestamp: number }[]
+
+    const windows: Message[][] = []
+
+    // 2. Fetch the sliding window for each pivot
+    const fetchWindow = this.db.prepare(`
+      SELECT * FROM (
+        SELECT * FROM messages 
+        WHERE chat_id = ? AND timestamp <= ? 
+        ORDER BY timestamp DESC LIMIT ?
+      ) 
+      UNION 
+      SELECT * FROM (
+        SELECT * FROM messages 
+        WHERE chat_id = ? AND timestamp >= ? 
+        ORDER BY timestamp ASC LIMIT ?
+      )
+      ORDER BY timestamp ASC
+    `)
+
+    for (const p of pivots) {
+      const windowMsgs = fetchWindow.all(
+        p.chat_id, p.timestamp, windowSize + 1, 
+        p.chat_id, p.timestamp, windowSize + 1
+      ) as Message[]
+      windows.push(windowMsgs)
+    }
+
+    return windows
+  }
 }

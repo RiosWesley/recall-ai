@@ -142,4 +142,65 @@ export class SessionRepository {
 
     return row.count
   }
+
+  searchNarrative(keywords: string[], limit = 5, options?: { dateFrom?: number, dateTo?: number }): Session[] {
+    if (!keywords || keywords.length === 0) return []
+    
+    const cleanTokens = keywords.map(k => k.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, '').trim()).filter(Boolean)
+    if (cleanTokens.length === 0) return []
+    const matchQuery = cleanTokens.map(k => `"${k}"*`).join(' OR ')
+
+    let query = `
+      SELECT s.*
+      FROM sessions_fts fts
+      JOIN sessions s ON fts.session_id = s.id
+      WHERE sessions_fts MATCH ?
+    `
+    const params: any[] = [matchQuery]
+
+    if (options?.dateFrom) {
+      query += ` AND s.start_time >= ?`
+      params.push(options.dateFrom)
+    }
+    if (options?.dateTo) {
+      query += ` AND s.end_time <= ?`
+      params.push(options.dateTo)
+    }
+
+    query += ` ORDER BY fts.rank LIMIT ?`
+    params.push(limit)
+
+    return this.db.prepare(query).all(...params) as Session[]
+  }
+
+  searchAggregation(keywords: string[], limit = 10, options?: { dateFrom?: number, dateTo?: number }): { name: string, type: string, count: number }[] {
+    if (!keywords || keywords.length === 0) return []
+    
+    const cleanTokens = keywords.map(k => k.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, '').trim()).filter(Boolean)
+    if (cleanTokens.length === 0) return []
+    const matchQuery = cleanTokens.map(k => `"${k}"*`).join(' OR ')
+
+    let query = `
+      SELECT e.normalized_name as name, e.type, COUNT(*) as count
+      FROM entities_fts fts
+      JOIN entities e ON fts.entity_id = e.id
+      JOIN sessions s ON e.session_id = s.id
+      WHERE entities_fts MATCH ?
+    `
+    const params: any[] = [matchQuery]
+
+    if (options?.dateFrom) {
+      query += ` AND s.start_time >= ?`
+      params.push(options.dateFrom)
+    }
+    if (options?.dateTo) {
+      query += ` AND s.end_time <= ?`
+      params.push(options.dateTo)
+    }
+
+    query += ` GROUP BY e.normalized_name, e.type ORDER BY count DESC LIMIT ?`
+    params.push(limit)
+
+    return this.db.prepare(query).all(...params) as { name: string, type: string, count: number }[]
+  }
 }

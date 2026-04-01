@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { nanoid } from 'nanoid';
 import { ModelManager } from './ModelManager';
 import { MODEL_REGISTRY } from './modelRegistry';
+import type { ClassifiedQuery } from '../../shared/types';
 
 const _dirname = typeof __dirname !== 'undefined'
   ? __dirname
@@ -199,6 +200,48 @@ export class WorkerProcess {
     }
 
     return JSON.parse(match[0]);
+  }
+
+  async classifyQuery(query: string): Promise<ClassifiedQuery> {
+    const prompt = `You are a strict data classification tool. You must respond ONLY with a valid JSON object matching the exact format requested. Do not include markdown \`\`\`json, do NOT include explanations, just output raw JSON text starting with { and ending with }.
+
+Classify the user's intent to search their chat log:
+1. "factual": The user is looking for a specific message, fact, quote, or event. (e.g. "what is the wifi password?", "when did he say yes?")
+2. "aggregation": The user is asking for counts, metrics, or frequencies. (e.g. "how many times did I say no?", "top topics")
+3. "narrative": The user wants a summary of a period. (e.g. "what happened yesterday?", "summarize our trip discussion")
+
+Also extract 1 to 3 core keywords. If the user specifies a date constraint, extract it to dateRange.start / end (e.g. "2024-03-24", "yesterday"), otherwise use null.
+
+Query: "${query}"
+
+Required JSON schema:
+{
+  "intent": "factual" | "aggregation" | "narrative" | "unknown",
+  "keywords": ["keyword1"],
+  "dateRange": {
+    "start": string | null,
+    "end": string | null
+  }
+}`;
+
+    const options: GenerateOptions = {
+      temperature: 0.1,
+      maxTokens: 150,
+      systemPrompt: "You are a headless JSON API. Respond only with raw JSON."
+    };
+
+    const res = await this.generateJson<ClassifiedQuery>(prompt, options, 3);
+    
+    // Safety check ensuring the intent is valid
+    const validIntents = ['factual', 'aggregation', 'narrative', 'unknown'];
+    if (!validIntents.includes(res.intent)) {
+      res.intent = 'factual';
+    }
+    if (!res.keywords || !Array.isArray(res.keywords)) {
+      res.keywords = [];
+    }
+
+    return res;
   }
 
   private async processNextInQueue() {

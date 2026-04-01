@@ -721,7 +721,7 @@ src/main/services/
 
 ---
 
-## [ ] TASK 4.1 — Routing Algorítmico do Motor de Busca (Sem LLM)
+## [x] TASK 4.1 — Routing Algorítmico do Motor de Busca (Sem LLM)
 
 **Objetivo:** Definir as lógicas de retrieval FTS5 nativo. Criar caminhos de pesquisa independentes orientados à intenção de usuário, substituindo o KNN Híbrido obsoleto.
 
@@ -821,9 +821,9 @@ src/main/services/
 | **Fase 1** — Database & Parser | 4 | 4 | ✅ Concluída |
 | **Fase 2** — Model Download Services | 5 | 5 | ✅ Concluída |
 | **Fase 3** — Dual-Model Architecture | 4 | 2 | 🟡 Em andamento (Worker Pending) |
-| **Fase 4** — Deterministic Pipeline | 2 | 0 | ⬜ Não iniciada |
+| **Fase 4** — Deterministic Pipeline | 2 | 1 | 🟡 Em andamento |
 | **Fase 5** — Interactive Interface & QA | 3 | 0 | ⬜ Não iniciada |
-| **TOTAL** | **18** | **11** | **61%** |
+| **TOTAL** | **18** | **12** | **66%** |
 
 **Milestones:**
 - [x] **MVP 1** — Pipeline de Storage Básico Funcional
