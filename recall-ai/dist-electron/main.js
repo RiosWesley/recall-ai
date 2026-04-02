@@ -981,7 +981,27 @@ class SessionRepository {
   }
   searchNarrative(keywords, limit = 5, options) {
     if (!keywords || keywords.length === 0) return [];
-    const cleanTokens = keywords.map((k) => k.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, "").trim()).filter(Boolean);
+    if (keywords.includes("#RECENT#")) {
+      let q = `SELECT * FROM sessions`;
+      const p = [];
+      const clauses = [];
+      if (options == null ? void 0 : options.dateFrom) {
+        clauses.push(`start_time >= ?`);
+        p.push(options.dateFrom);
+      }
+      if (options == null ? void 0 : options.dateTo) {
+        clauses.push(`end_time <= ?`);
+        p.push(options.dateTo);
+      }
+      if (clauses.length > 0) {
+        q += ` WHERE ` + clauses.join(" AND ");
+      }
+      q += ` ORDER BY start_time DESC LIMIT ?`;
+      p.push(limit);
+      const rows = this.db.prepare(q).all(...p);
+      return rows.reverse();
+    }
+    const cleanTokens = keywords.map((k) => k.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ]/g, "").trim()).filter(Boolean);
     if (cleanTokens.length === 0) return [];
     const matchQuery = cleanTokens.map((k) => `"${k}"*`).join(" OR ");
     let query = `
@@ -1689,6 +1709,7 @@ Intent rules:
 Your task:
 1. Identify "intent".
 2. Extract ONLY the core topical nouns/entities from the query as "keywords". Exclude ALL conversational stop-words (e.g. "citados", "conversa", "vezes", "falaram", "sobre", "quais", "mais", "aqui"). 
+3. *CRITICAL RULE*: If the user asks for a general timeline, summary without a specific topic, or what happened "recently" / "last week" / "yesterday" (e.g. "o que rolou ontem", "o que foi conversado na semana passada", "resumo"), set intent to "narrative" and keywords MUST be exactly ["#RECENT#"]. Do NOT extract "semana" or "passada" as keywords!
 
 Examples:
 Query: "quais jogos mais citados na conversa"
@@ -1697,8 +1718,8 @@ Query: "quais jogos mais citados na conversa"
 Query: "o que falaram sobre o projeto delta ontem?"
 {"intent": "narrative", "keywords": ["projeto", "delta"], "dateRange": {"start": "ontem", "end": "ontem"}}
 
-Query: "top assuntos abordados"
-{"intent": "aggregation", "keywords": ["assuntos"], "dateRange": {"start": null, "end": null}}
+Query: "o que rolou na semana passada?"
+{"intent": "narrative", "keywords": ["#RECENT#"], "dateRange": {"start": "semana passada", "end": "semana passada"}}
 
 Query: "qual a senha do wifi"
 {"intent": "factual", "keywords": ["senha", "wifi"], "dateRange": {"start": null, "end": null}}

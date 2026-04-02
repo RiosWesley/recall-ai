@@ -214,6 +214,7 @@ Intent rules:
 Your task:
 1. Identify "intent".
 2. Extract ONLY the core topical nouns/entities from the query as "keywords". Exclude ALL conversational stop-words (e.g. "citados", "conversa", "vezes", "falaram", "sobre", "quais", "mais", "aqui"). 
+3. *CRITICAL RULE*: If the user asks for a general timeline, summary without a specific topic, or what happened "recently" / "last week" / "yesterday" (e.g. "o que rolou ontem", "o que foi conversado na semana passada", "resumo"), set intent to "narrative" and keywords MUST be exactly ["#RECENT#"]. Do NOT extract "semana" or "passada" as keywords!
 
 Examples:
 Query: "quais jogos mais citados na conversa"
@@ -222,8 +223,8 @@ Query: "quais jogos mais citados na conversa"
 Query: "o que falaram sobre o projeto delta ontem?"
 {"intent": "narrative", "keywords": ["projeto", "delta"], "dateRange": {"start": "ontem", "end": "ontem"}}
 
-Query: "top assuntos abordados"
-{"intent": "aggregation", "keywords": ["assuntos"], "dateRange": {"start": null, "end": null}}
+Query: "o que rolou na semana passada?"
+{"intent": "narrative", "keywords": ["#RECENT#"], "dateRange": {"start": "semana passada", "end": "semana passada"}}
 
 Query: "qual a senha do wifi"
 {"intent": "factual", "keywords": ["senha", "wifi"], "dateRange": {"start": null, "end": null}}

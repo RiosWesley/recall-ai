@@ -199,8 +199,36 @@ export class SessionRepository {
 
   searchNarrative(keywords: string[], limit = 5, options?: { dateFrom?: number, dateTo?: number }): Session[] {
     if (!keywords || keywords.length === 0) return []
+
+    // Bypass genérico para narrativas temporais sem tópico específico
+    if (keywords.includes('#RECENT#')) {
+      let q = `SELECT * FROM sessions`
+      const p: any[] = []
+      const clauses: string[] = []
+
+      if (options?.dateFrom) {
+        clauses.push(`start_time >= ?`)
+        p.push(options.dateFrom)
+      }
+      if (options?.dateTo) {
+        clauses.push(`end_time <= ?`)
+        p.push(options.dateTo)
+      }
+
+      if (clauses.length > 0) {
+        q += ` WHERE ` + clauses.join(' AND ')
+      }
+
+      q += ` ORDER BY start_time DESC LIMIT ?`
+      p.push(limit)
+
+      // Retorna na ordem original cronológica para leitura
+      const rows = this.db.prepare(q).all(...p) as Session[]
+      return rows.reverse()
+    }
     
-    const cleanTokens = keywords.map(k => k.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, '').trim()).filter(Boolean)
+    // Normal FTS Search Filter
+    const cleanTokens = keywords.map(k => k.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ]/g, '').trim()).filter(Boolean)
     if (cleanTokens.length === 0) return []
     const matchQuery = cleanTokens.map(k => `"${k}"*`).join(' OR ')
 
