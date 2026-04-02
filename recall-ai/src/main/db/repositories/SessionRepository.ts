@@ -79,6 +79,60 @@ export class SessionRepository {
     runAll(sessions, entities)
   }
 
+  /**
+   * Update a session with its NLP summary and insert its entities + FTS5 entries.
+   * Used by the background NLP worker.
+   */
+  updateSessionNLP(sessionId: string, summary: string, entities: NewEntity[]): void {
+    const updateSession = this.db.prepare(`
+      UPDATE sessions SET summary = @summary WHERE id = @id
+    `)
+
+    const updateSessionFts = this.db.prepare(`
+      UPDATE sessions_fts SET summary = @summary WHERE session_id = @id
+    `)
+
+    const insertEntity = this.db.prepare(`
+      INSERT INTO entities (
+        id, session_id, name, normalized_name, type, action
+      ) VALUES (
+        @id, @session_id, @name, @normalized_name, @type, @action
+      )
+    `)
+
+    const insertEntityFts = this.db.prepare(`
+      INSERT INTO entities_fts (normalized_name, type, action, entity_id)
+      VALUES (@normalized_name, @type, @action, @entity_id)
+    `)
+
+    const runAll = this.db.transaction(() => {
+      // 1. Update session & its FTS
+      updateSession.run({ summary, id: sessionId })
+      updateSessionFts.run({ summary, id: sessionId })
+
+      // 2. Insert new entities
+      for (const ent of entities) {
+        const id = ent.id ?? nanoid()
+        insertEntity.run({
+          id,
+          session_id: ent.session_id,
+          name: ent.name,
+          normalized_name: ent.normalized_name,
+          type: ent.type,
+          action: ent.action,
+        })
+        insertEntityFts.run({ 
+          normalized_name: ent.normalized_name, 
+          type: ent.type, 
+          action: ent.action, 
+          entity_id: id 
+        })
+      }
+    })
+
+    runAll()
+  }
+
   findByChatId(chatId: string): Session[] {
     const rows = this.db.prepare(`
       SELECT * FROM sessions

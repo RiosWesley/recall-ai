@@ -787,7 +787,7 @@ src/main/services/
 
 ---
 
-## [ ] TASK 5.2 — Dashboard Import Pipeline (Batch GUI)
+## [x] TASK 5.2 — Dashboard Import Pipeline (Batch GUI)
 
 **Objetivo:** Remodelar a Sidebar e o Upload Handler lidando com o Worker Extract.
 
@@ -796,7 +796,7 @@ src/main/services/
 2. Permitir que o Chat seja explorado mesmo que as entidades finais (Passo 5) não tenham terminado de rodar.
 
 **Critérios de aceitação:**
-- [ ] Resposta visual ágil as tarefas parciais salvas pelas transações do DB.
+- [x] Resposta visual ágil as tarefas parciais salvas pelas transações do DB.
 
 ---
 

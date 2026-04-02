@@ -83,22 +83,87 @@ export class ChatImportService {
         last_message_at: parseResult.stats.lastTimestamp ?? undefined,
       })
 
-      emit({ stage: 'chunking', percent: 25, label: 'Agrupando Sessões', detail: 'Topologia Cronológica...' })
+      emit({ stage: 'fts_indexing', percent: 25, label: 'Agrupando Sessões', detail: 'Topologia Cronológica...' })
       
       const rawSessions = this.sessionEngine.group(parseResult.messages)
+
+      const newSessions: NewSession[] = []
       
-      emit({ stage: 'embedding', percent: 35, label: 'Extração NLP', detail: `Processando ${rawSessions.length} sessões...` })
+      for (const rawSess of rawSessions) {
+        newSessions.push({
+          id: nanoid(),
+          chat_id: chatId!,
+          start_time: rawSess.start_time,
+          end_time: rawSess.end_time,
+          message_count: rawSess.message_count,
+          summary: "Processando IA em background..." // Temporary summary
+        })
+      }
+
+      // Final Phase: Store everything via Repositories immediately so indexing is fast
+      emit({ stage: 'fts_indexing', percent: 40, label: 'Salvando no banco', detail: 'Persistindo histórico nativo e Indexando FTS5...' })
+      const messageRepo = new MessageRepository(db)
+      messageRepo.insertBatch(newMessages)
+      
+      const sessionRepo = new SessionRepository(db)
+      sessionRepo.insertBatch(newSessions, []) // no entities yet
+      
+      // Dispatch Background Job for NLP Extraction
+      this.runBackgroundNLP(chatId!, rawSessions, newSessions, sender).catch((err) => {
+        console.error('[Background NLP Error]', err)
+        // Emitting error might be disruptive if the user already proceeded, but we might want to log it
+      })
+
+      return {
+        success: true,
+        chatId: chatId!,
+        chatName: chatName,
+        messageCount: parseResult.messages.length,
+        chunkCount: newSessions.length, // total sessions
+      }
+    } catch (err) {
+      if (chatId) {
+         try {
+           const db = DatabaseService.getInstance()
+           new ChatRepository(db).delete(chatId) 
+         } catch (e) { }
+      }
+
+      const message = err instanceof Error ? err.message : String(err)
+      console.error('[ChatImportService] Import failed:', message)
+      emit({ stage: 'error', percent: 0, label: 'Erro na importação', detail: message })
+      return { success: false, error: message }
+    }
+  }
+
+  /**
+   * Background process to extract summaries and entities via Worker
+   */
+  private async runBackgroundNLP(
+    chatId: string,
+    rawSessions: ReturnType<SessionEngine['group']>, 
+    dbSessions: NewSession[],
+    sender?: WebContents
+  ) {
+    const emit = (progress: ImportProgress) => {
+      // IPC to everyone, or standard IPC reply (we are using the global event name `import:progress`)
+      sender?.send('import:progress', progress)
+    }
+
+    try {
+      emit({ stage: 'nlp_summaries', percent: 20, label: 'Extração NLP Iniciada', detail: `Processando ${rawSessions.length} sessões...`, chatId } as any)
 
       // Spin up the worker
       const worker = WorkerProcess.getInstance()
       await worker.initialize()
 
-      const newSessions: NewSession[] = []
-      const newEntities: NewEntity[] = []
+      const db = DatabaseService.getInstance()
+      const sessionRepo = new SessionRepository(db)
 
       let processed = 0
-      for (const rawSess of rawSessions) {
-        const sessionId = nanoid()
+      for (let i = 0; i < rawSessions.length; i++) {
+        const rawSess = rawSessions[i]
+        const dbSess = dbSessions[i]
         const convoContext = rawSess.messages.map(m => `[${new Date(m.timestamp * 1000).toISOString()}] ${m.sender}: ${m.content}`).join('\n')
         
         // Strict JSON prompt
@@ -124,71 +189,42 @@ ${convoContext}`
             extractedEntities = result.entities
           }
         } catch(e: any) {
-          console.warn('[ChatImportService] Worker extraction failed on session:', e.message)
+          console.warn('[ChatImportService Worker] Worker extraction failed on session:', e.message)
         }
 
-        newSessions.push({
-          id: sessionId,
-          chat_id: chatId,
-          start_time: rawSess.start_time,
-          end_time: rawSess.end_time,
-          message_count: rawSess.message_count,
-          summary
-        })
-
+        const newEntities: NewEntity[] = []
         for (const ent of extractedEntities) {
           if (!ent.name) continue
           newEntities.push({
             id: nanoid(),
-            session_id: sessionId,
+            session_id: dbSess.id!,
             name: ent.name,
-            normalized_name: ent.name.toLowerCase().trim(), // very basic normalize here
+            normalized_name: ent.name.toLowerCase().trim(),
             type: ent.type || 'unknown',
             action: ent.action || 'mentioned'
           })
         }
 
+        // Update this session in Database
+        sessionRepo.updateSessionNLP(dbSess.id!, summary, newEntities)
+
         processed++
+        const isEntitiesPhase = processed > rawSessions.length * 0.7
+
         if (processed % 5 === 0 || processed === rawSessions.length) {
           emit({ 
-            stage: 'embedding', 
-            percent: 35 + Math.round((processed / rawSessions.length) * 55), // maps to 35-90%
-            label: 'Extraindo Metadados (NLP)', 
-            detail: `${processed} / ${rawSessions.length} sessões processadas...` 
-          })
+            stage: isEntitiesPhase ? 'nlp_entities' : 'nlp_summaries', 
+            percent: 20 + Math.round((processed / rawSessions.length) * 80), 
+            label: isEntitiesPhase ? 'Resolvendo Entidades' : 'Processando Resumos (Batch)', 
+            detail: `${processed} / ${rawSessions.length} sessões analisadas...`,
+            chatId // Note: sending chatId along to identify bg process per chat
+          } as any) // Type assertion to bypass strict interface since we added chatId in payload dynamically
         }
       }
 
-      // Final Phase: Store everything via Repositories
-      emit({ stage: 'storing', percent: 92, label: 'Salvando no banco', detail: 'Persistindo histórico nativo...' })
-      const messageRepo = new MessageRepository(db)
-      messageRepo.insertBatch(newMessages)
-
-      emit({ stage: 'storing', percent: 96, label: 'Indexando Sessões', detail: 'Indexando FTS5...' })
-      const sessionRepo = new SessionRepository(db)
-      sessionRepo.insertBatch(newSessions, newEntities)
-
-      emit({ stage: 'done', percent: 100, label: 'Importação concluída', detail: `${parseResult.messages.length} mensagens & ${rawSessions.length} sessões processadas com IA.` })
-
-      return {
-        success: true,
-        chatId: chatId!,
-        chatName: chatName,
-        messageCount: parseResult.messages.length,
-        chunkCount: newSessions.length, // Renaming metric logic, using sessions count
-      }
-    } catch (err) {
-      if (chatId) {
-         try {
-           const db = DatabaseService.getInstance()
-           new ChatRepository(db).delete(chatId) 
-         } catch (e) { }
-      }
-
-      const message = err instanceof Error ? err.message : String(err)
-      console.error('[ChatImportService] Import failed:', message)
-      emit({ stage: 'error', percent: 0, label: 'Erro na importação', detail: message })
-      return { success: false, error: message }
+      emit({ stage: 'done', percent: 100, label: 'Concluído', detail: `Entidades Indexadas para o chat.`, chatId } as any)
+    } catch(err) {
+      console.error('[Background NLP Exception]', err)
     }
   }
 }

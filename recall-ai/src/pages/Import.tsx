@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import {
   Upload, FileText, CheckCircle2, RefreshCw,
-  Users, AlertCircle, Search
+  Users, AlertCircle, Search, MessageCircle
 } from 'lucide-react'
 import type { Page } from '../App'
 
@@ -11,26 +11,20 @@ interface ImportPageProps {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type ImportStage =
-  | 'idle'
-  | 'reading'
-  | 'parsing'
-  | 'chunking'
-  | 'embedding'
-  | 'storing'
-  | 'done'
-  | 'error'
+import type { ImportStageId } from '../shared/types'
+
+type ImportStage = ImportStageId | 'idle'
 
 // ─── Pipeline stages (display only) ──────────────────────────────────────────
 const PIPELINE_STAGES = [
   { id: 'reading'  as const, label: 'Lendo arquivo',       description: 'Lendo e calculando hash do arquivo' },
   { id: 'parsing'  as const, label: 'Parseando mensagens', description: 'Extraindo mensagens do formato WhatsApp' },
-  { id: 'chunking' as const, label: 'Segmentando chunks',  description: 'Agrupando mensagens por janela de tempo' },
-  { id: 'embedding' as const, label: 'Processamento Semântico',  description: 'Rodando Llama localmente para gerar os Vetores (isso pode levar um tempo)' },
-  { id: 'storing'  as const, label: 'Salvando no banco',   description: 'Persistindo vetores no SQLite-Vec' },
+  { id: 'fts_indexing' as const, label: 'FTS Indexing & Topologia',  description: 'Agrupando sessões temporalmente e salvando base nativa' },
+  { id: 'nlp_summaries' as const, label: 'Batch Summaries',  description: 'Worker extraindo intenção em background' },
+  { id: 'nlp_entities'  as const, label: 'Entity Resolving',   description: 'Consolidando dicionário estruturado e ações' },
 ]
 
-const STAGE_ORDER: ImportStage[] = ['reading', 'parsing', 'chunking', 'embedding', 'storing', 'done']
+const STAGE_ORDER: ImportStage[] = ['idle', 'reading', 'parsing', 'fts_indexing', 'nlp_summaries', 'nlp_entities', 'done', 'error']
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function ImportPage({ navigate }: ImportPageProps) {
@@ -41,6 +35,7 @@ export default function ImportPage({ navigate }: ImportPageProps) {
   const [detailMsg, setDetailMsg]       = useState<string | null>(null)
   const [messageCount, setMessageCount] = useState(0)
   const [errorMsg, setErrorMsg]         = useState<string | null>(null)
+  const [explorableChatId, setExplorableChatId] = useState<string | null>(null)
 
   // Subscribe to real progress events from main process
   useEffect(() => {
@@ -65,12 +60,14 @@ export default function ImportPage({ navigate }: ImportPageProps) {
     setProgress(0)
     setStage('reading')
     setErrorMsg(null)
+    setExplorableChatId(null)
 
     const result = await window.api.importChat(filePath)
 
     if (result.success) {
       setMessageCount(result.messageCount ?? 0)
-      setStage('done')
+      setExplorableChatId(result.chatId ?? null)
+      // Note: we DO NOT setStage('done') here. The background task will emit NLP stages and finally 'done'.
     } else if (result.duplicate) {
       setStage('error')
       setErrorMsg('Este arquivo já foi importado. Cada conversa só pode ser importada uma vez.')
@@ -162,6 +159,8 @@ export default function ImportPage({ navigate }: ImportPageProps) {
           progress={progress}
           fileName={fileName!}
           detailMsg={detailMsg}
+          explorableChatId={explorableChatId}
+          navigate={navigate}
         />
       )}
     </div>
@@ -259,8 +258,9 @@ function ErrorView({ message, reset }: { message: string; reset: () => void }) {
 }
 
 // ─── Progress View ────────────────────────────────────────────────────────────
-function ProgressView({ stage, stageIndex, progress, fileName, detailMsg }: {
-  stage: ImportStage, stageIndex: number, progress: number, fileName: string, detailMsg: string | null
+function ProgressView({ stage, stageIndex, progress, fileName, detailMsg, explorableChatId, navigate }: {
+  stage: ImportStage, stageIndex: number, progress: number, fileName: string, detailMsg: string | null,
+  explorableChatId: string | null, navigate: (page: Page, chatId?: string) => void
 }) {
   return (
     <div style={{ animation: 'fadeInUp 0.3s ease' }}>
@@ -298,6 +298,18 @@ function ProgressView({ stage, stageIndex, progress, fileName, detailMsg }: {
           })}
         </div>
       </div>
+      
+      {explorableChatId && (
+        <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'center', animation: 'fadeInUp 0.3s ease' }}>
+          <button 
+             className="btn btn--primary" 
+             onClick={() => navigate('chat', explorableChatId)}
+             style={{ gap: '8px', fontSize: '13px', padding: '10px 24px' }}>
+            <MessageCircle size={15} />
+            Chat disponível! Explorar agora
+          </button>
+        </div>
+      )}
     </div>
   )
 }

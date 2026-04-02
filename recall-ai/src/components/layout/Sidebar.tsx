@@ -15,6 +15,7 @@ interface SidebarProps {
 export default function Sidebar({ currentPage, navigate }: SidebarProps) {
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const [chats, setChats] = useState<Chat[]>([])
+  const [processingChats, setProcessingChats] = useState<Set<string>>(new Set())
 
   const refreshChats = useCallback(async () => {
     try {
@@ -28,10 +29,25 @@ export default function Sidebar({ currentPage, navigate }: SidebarProps) {
   useEffect(() => {
     refreshChats()
 
-    // Re-fetch chats after import completes
-    const unsub = window.api.onImportProgress((progress) => {
-      if (progress.stage === 'done') {
-        refreshChats()
+    // Re-fetch chats and update processing sets
+    const unsub = window.api.onImportProgress((p: any) => {
+      if (p.chatId) {
+        if (p.stage === 'done' || p.stage === 'error') {
+          setProcessingChats(prev => {
+            const next = new Set(prev)
+            next.delete(p.chatId)
+            return next
+          })
+          if (p.stage === 'done') refreshChats()
+        } else if (p.stage === 'nlp_summaries' || p.stage === 'nlp_entities') {
+          setProcessingChats(prev => {
+             const next = new Set(prev)
+             next.add(p.chatId)
+             return next
+          })
+        }
+      } else {
+        if (p.stage === 'done') refreshChats()
       }
     })
 
@@ -156,7 +172,9 @@ export default function Sidebar({ currentPage, navigate }: SidebarProps) {
           </div>
         ) : (
           <div className="sidebar__nav" style={{ marginTop: '4px' }}>
-            {chats.map(chat => (
+            {chats.map(chat => {
+              const isProcessing = processingChats.has(chat.id)
+              return (
               <div
                 key={chat.id}
                 className={`chat-item ${activeChatId === chat.id ? 'active' : ''}`}
@@ -169,6 +187,13 @@ export default function Sidebar({ currentPage, navigate }: SidebarProps) {
                     background: colorFor(chat.id), flexShrink: 0, opacity: 0.8,
                   }} />
                   <span className="chat-item__name">{chat.name}</span>
+                  {isProcessing && (
+                    <span 
+                      title="IA modelando grafos de memória no fundo..." 
+                      className="spinner" 
+                      style={{ width: '10px', height: '10px', flexShrink: 0, border: '1px solid rgba(0,217,126,0.2)', borderTopColor: 'var(--accent-emerald)', borderRadius: '50%' }} 
+                    />
+                  )}
                 </div>
                 <div className="chat-item__meta" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <MessageCircle size={9} style={{ display: 'inline' }} />
@@ -191,7 +216,7 @@ export default function Sidebar({ currentPage, navigate }: SidebarProps) {
                   </button>
                 </div>
               </div>
-            ))}
+            )})}
           </div>
         )}
 

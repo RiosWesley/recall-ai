@@ -169,9 +169,9 @@ export interface SearchHistory {
 export type ImportStageId =
   | 'reading'
   | 'parsing'
-  | 'chunking'
-  | 'embedding'
-  | 'storing'
+  | 'fts_indexing'
+  | 'nlp_summaries'
+  | 'nlp_entities'
   | 'done'
   | 'error'
 
