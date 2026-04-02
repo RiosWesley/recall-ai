@@ -171,27 +171,25 @@ function SliderRow({ label, desc, value, min, max, step, format, onChange }: Sli
 
 export default function SettingsPage() {
   const [gpu, setGpu] = useState('auto')
-  const [topK, setTopK] = useState(5)
-  const [alpha, setAlpha] = useState(0.7)
+  const [topK, setTopK] = useState(15)
   const [temp, setTemp] = useState(0.3)
   const [systemPrompt, setSystemPrompt] = useState('Você é um assistente encarregado de ler históricos de chat. Responda apenas com o que estiver no context.')
   const [history, setHistory] = useState(true)
   const [analytics, setAnalytics] = useState(false)
-  const [customLlmPath, setCustomLlmPath] = useState<string | null>(null)
-  const [customEmbeddingPath, setCustomEmbeddingPath] = useState<string | null>(null)
+  const [customBrainPath, setCustomBrainPath] = useState<string | null>(null)
+  const [customWorkerPath, setCustomWorkerPath] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     window.api.getSettings().then(cfg => {
       setGpu(cfg.gpu)
       setTopK(cfg.topK)
-      setAlpha(cfg.alpha)
       setTemp(cfg.temperature)
       setSystemPrompt(cfg.systemPrompt || '')
       setHistory(cfg.history)
       setAnalytics(cfg.analytics)
-      setCustomLlmPath(cfg.customLlmPath || null)
-      setCustomEmbeddingPath(cfg.customEmbeddingPath || null)
+      setCustomBrainPath(cfg.customBrainPath || null)
+      setCustomWorkerPath(cfg.customWorkerPath || null)
       setLoading(false)
     }).catch(err => {
       console.error('Failed to load settings', err)
@@ -215,27 +213,27 @@ export default function SettingsPage() {
     }, 1000)
   }
 
-  const handleSwapModel = async (type: 'llm' | 'embedding') => {
+  const handleSwapModel = async (type: 'brain' | 'worker') => {
     try {
       const path = await window.api.selectModelFile()
       if (path) {
-        if (type === 'llm') updateConfig('customLlmPath', path, setCustomLlmPath)
-        else updateConfig('customEmbeddingPath', path, setCustomEmbeddingPath)
+        if (type === 'brain') updateConfig('customBrainPath', path, setCustomBrainPath)
+        else updateConfig('customWorkerPath', path, setCustomWorkerPath)
       }
     } catch (err) {
       console.error('Failed to pick file:', err)
     }
   }
 
-  const handleClearModel = (type: 'llm' | 'embedding') => {
-    if (type === 'llm') updateConfig('customLlmPath', null, setCustomLlmPath)
-    else updateConfig('customEmbeddingPath', null, setCustomEmbeddingPath)
+  const handleClearModel = (type: 'brain' | 'worker') => {
+    if (type === 'brain') updateConfig('customBrainPath', null, setCustomBrainPath)
+    else updateConfig('customWorkerPath', null, setCustomWorkerPath)
   }
 
   if (loading) return null
 
-  const displayLlmName = customLlmPath ? customLlmPath.split('\\').pop()?.split('/').pop() : 'Gemma 3 270M INT4 GGUF'
-  const displayEmbName = customEmbeddingPath ? customEmbeddingPath.split('\\').pop()?.split('/').pop() : 'nomic-embed-text-v1.5 GGUF'
+  const displayBrainName = customBrainPath ? customBrainPath.split('\\').pop()?.split('/').pop() : 'Qwen 3.5 4B GGUF'
+  const displayWorkerName = customWorkerPath ? customWorkerPath.split('\\').pop()?.split('/').pop() : 'LFM2.5 350M GGUF'
 
   return (
     <div className="page">
@@ -270,7 +268,7 @@ export default function SettingsPage() {
           <div className="settings-row__info" style={{ width: '100%' }}>
             <span className="settings-row__label">Instrução do Sistema (System Prompt)</span>
             <span className="settings-row__desc" style={{ marginBottom: '8px', display: 'block' }}>
-              Define a "personalidade" base e as regras estruturais da Inteligência Artificial.
+              Define a "personalidade" base do Brain Process (Síntese).
             </span>
             <textarea
               className="chat-input selectable"
@@ -289,24 +287,24 @@ export default function SettingsPage() {
         </div>
         <div className="settings-row">
           <div className="settings-row__info">
-            <span className="settings-row__label">Modelo LLM</span>
-            <span className="settings-row__desc" title={customLlmPath || undefined}>
-              {displayLlmName} {customLlmPath ? '(Customizado)' : '· ~150MB'}
+            <span className="settings-row__label">Brain Model (Síntese)</span>
+            <span className="settings-row__desc" title={customBrainPath || undefined}>
+              {displayBrainName} {customBrainPath ? '(Customizado)' : '· ~2.71GB · Q4_K_M'}
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span className="badge badge--emerald">{customLlmPath ? 'B.Y.O.M.' : 'Oficial'}</span>
+            <span className="badge badge--emerald">{customBrainPath ? 'B.Y.O.M.' : 'Oficial'}</span>
             
-            {customLlmPath && (
+            {customBrainPath && (
               <button 
                 className="btn btn--ghost" 
-                onClick={() => handleClearModel('llm')}
+                onClick={() => handleClearModel('brain')}
                 style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--danger)' }}>
                 Limpar
               </button>
             )}
 
-            <button className="btn btn--ghost" onClick={() => handleSwapModel('llm')} style={{ fontSize: '11px', padding: '4px 8px', gap: '5px' }}>
+            <button className="btn btn--ghost" onClick={() => handleSwapModel('brain')} style={{ fontSize: '11px', padding: '4px 8px', gap: '5px' }}>
               <FolderOpen size={11} />
               Trocar
             </button>
@@ -314,24 +312,24 @@ export default function SettingsPage() {
         </div>
         <div className="settings-row">
           <div className="settings-row__info">
-            <span className="settings-row__label">Modelo de Embedding</span>
-            <span className="settings-row__desc" title={customEmbeddingPath || undefined}>
-              {displayEmbName} {customEmbeddingPath ? '(Customizado)' : '· ~80MB · dim 768'}
+            <span className="settings-row__label">Worker Model (NLP/Ingestão)</span>
+            <span className="settings-row__desc" title={customWorkerPath || undefined}>
+              {displayWorkerName} {customWorkerPath ? '(Customizado)' : '· ~379MB · Q8_0'}
             </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span className="badge badge--emerald">{customEmbeddingPath ? 'B.Y.O.M.' : 'Oficial'}</span>
+            <span className="badge badge--emerald">{customWorkerPath ? 'B.Y.O.M.' : 'Oficial'}</span>
             
-            {customEmbeddingPath && (
+            {customWorkerPath && (
               <button 
                 className="btn btn--ghost" 
-                onClick={() => handleClearModel('embedding')}
+                onClick={() => handleClearModel('worker')}
                 style={{ fontSize: '11px', padding: '4px 8px', color: 'var(--danger)' }}>
                 Limpar
               </button>
             )}
 
-            <button className="btn btn--ghost" onClick={() => handleSwapModel('embedding')} style={{ fontSize: '11px', padding: '4px 8px', gap: '5px' }}>
+            <button className="btn btn--ghost" onClick={() => handleSwapModel('worker')} style={{ fontSize: '11px', padding: '4px 8px', gap: '5px' }}>
               <FolderOpen size={11} />
               Trocar
             </button>
@@ -340,26 +338,16 @@ export default function SettingsPage() {
       </SettingsSection>
 
       {/* Search Settings */}
-      <SettingsSection title="Busca & RAG" icon={<Sliders size={12} />} color="var(--accent-cyan)">
+      <SettingsSection title="Busca & RAG Determinístico" icon={<Sliders size={12} />} color="var(--accent-cyan)">
         <SliderRow
-          label="Top-K resultados"
-          desc="Número de chunks recuperados para o contexto da IA"
+          label="Sliding Window Context (Top-K)"
+          desc="Número de sessões expandidas alimentando o Brain"
           value={topK}
           min={1}
           max={20}
           step={1}
           format={v => String(v)}
           onChange={v => updateConfig('topK', v, setTopK)}
-        />
-        <SliderRow
-          label="Alpha (busca híbrida)"
-          desc="Peso entre busca semântica (1.0) e keyword (0.0)"
-          value={alpha}
-          min={0}
-          max={1}
-          step={0.05}
-          format={v => v.toFixed(2)}
-          onChange={v => updateConfig('alpha', v, setAlpha)}
         />
         <ToggleRow
           label="Histórico de buscas"
@@ -374,7 +362,7 @@ export default function SettingsPage() {
         <div className="settings-row">
           <div className="settings-row__info">
             <span className="settings-row__label">Banco de dados</span>
-            <span className="settings-row__desc">SQLite · better-sqlite3 · sqlite-vec</span>
+            <span className="settings-row__desc">SQLite · better-sqlite3 · FTS5 Indexing</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
@@ -389,7 +377,7 @@ export default function SettingsPage() {
         <div className="settings-row">
           <div className="settings-row__info">
             <span className="settings-row__label">Diretório de modelos</span>
-            <span className="settings-row__desc">Onde os arquivos GGUF são armazenados</span>
+            <span className="settings-row__desc">Onde os Modelos GGUF e Caches estão localizados</span>
           </div>
           <button className="btn btn--ghost" style={{ fontSize: '11px', padding: '4px 8px', gap: '5px' }}>
             <FolderOpen size={11} />
@@ -402,7 +390,7 @@ export default function SettingsPage() {
               Limpar todos os dados
             </span>
             <span className="settings-row__desc">
-              Remove todas as conversas e embeddings do banco local
+              Remove todas as conversas nativas e os indíces contextuais extraídos.
             </span>
           </div>
           <button
@@ -450,7 +438,7 @@ export default function SettingsPage() {
         justifyContent: 'space-between',
       }}>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
-          Recall.ai v0.1.0-dev · Electron + React + node-llama-cpp
+          Recall.ai v0.2.0-dev · RAG Determinístico + Qwen 3.5
         </span>
         <button className="btn btn--ghost" style={{ fontSize: '11px', gap: '5px', padding: '5px 10px' }}>
           Verificar atualizações <ChevronRight size={11} />

@@ -292,10 +292,9 @@ export interface AppSettings {
   temperature: number
   systemPrompt: string
   topK: number
-  alpha: number
   history: boolean
   analytics: boolean
-  customLlmPath: string | null
-  customEmbeddingPath: string | null
+  customBrainPath: string | null
+  customWorkerPath: string | null
 }
 

@@ -8,11 +8,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   temperature: 0.3,
   systemPrompt: 'Você é um assistente encarregado de ler históricos de chat. Responda apenas com o que estiver no contexto.',
   topK: 15,
-  alpha: 0.7,
   history: true,
   analytics: false,
-  customLlmPath: null,
-  customEmbeddingPath: null
+  customBrainPath: null,
+  customWorkerPath: null
 }
 
 export class SettingsService {
@@ -40,8 +39,8 @@ export class SettingsService {
 
   public update(partial: Partial<AppSettings>): AppSettings {
     const hasGpuChanged = partial.gpu !== undefined && partial.gpu !== this.currentSettings.gpu
-    const hasLlmChanged = 'customLlmPath' in partial && partial.customLlmPath !== this.currentSettings.customLlmPath
-    const hasEmbChanged = 'customEmbeddingPath' in partial && partial.customEmbeddingPath !== this.currentSettings.customEmbeddingPath
+    const hasBrainChanged = 'customBrainPath' in partial && partial.customBrainPath !== this.currentSettings.customBrainPath
+    const hasWorkerChanged = 'customWorkerPath' in partial && partial.customWorkerPath !== this.currentSettings.customWorkerPath
 
     this.currentSettings = {
       ...this.currentSettings,
@@ -50,17 +49,15 @@ export class SettingsService {
     this.save()
 
     // Resets LLM/Embedding runtime models if GPU backend or Paths changed to force re-initialization
-    if (hasGpuChanged || hasLlmChanged || hasEmbChanged) {
+    if (hasGpuChanged || hasBrainChanged || hasWorkerChanged) {
       setTimeout(async () => {
         console.log('[SettingsService] Critical backend setting changed. Disposing active models for cold-restart.')
         // Lazy import avoids circular dependency loops in ESM
         const { WorkerProcess } = await import('./WorkerProcess')
         const { BrainProcess } = await import('./BrainProcess')
-        const { EmbeddingService } = await import('./EmbeddingService')
         
         try { WorkerProcess.getInstance().dispose() } catch(e){}
         try { BrainProcess.getInstance().dispose() } catch(e){}
-        try { EmbeddingService.getInstance().dispose() } catch(e){}
       }, 0)
     }
 

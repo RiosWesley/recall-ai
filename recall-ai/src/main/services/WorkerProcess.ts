@@ -203,31 +203,38 @@ export class WorkerProcess {
   }
 
   async classifyQuery(query: string): Promise<ClassifiedQuery> {
-    const prompt = `You are a strict data classification tool. You must respond ONLY with a valid JSON object matching the exact format requested. Do not include markdown \`\`\`json, do NOT include explanations, just output raw JSON text starting with { and ending with }.
+    const prompt = `You are a strict JSON classification tool. You analyze Portuguese queries to search chat logs.
+Output ONLY raw JSON.
 
-Classify the user's intent to search their chat log:
-1. "factual": The user is looking for a specific message, fact, quote, or event. (e.g. "what is the wifi password?", "when did he say yes?")
-2. "aggregation": The user is asking for counts, metrics, or frequencies. (e.g. "how many times did I say no?", "top topics")
-3. "narrative": The user wants a summary of a period. (e.g. "what happened yesterday?", "summarize our trip discussion")
+Intent rules:
+- "factual": Specific messages, facts, quotes (e.g. "senha do wifi", "onde vc mandou o link")
+- "aggregation": Counts, metrics, rankings (e.g. "quantas vezes", "mais citados", "top assuntos")
+- "narrative": Summaries of periods (e.g. "o que rolou ontem", "resuma a briga")
 
-Also extract 1 to 3 core keywords. If the user specifies a date constraint, extract it to dateRange.start / end (e.g. "2024-03-24", "yesterday"), otherwise use null.
+Your task:
+1. Identify "intent".
+2. Extract ONLY the core topical nouns/entities from the query as "keywords". Exclude ALL conversational stop-words (e.g. "citados", "conversa", "vezes", "falaram", "sobre", "quais", "mais", "aqui"). 
+
+Examples:
+Query: "quais jogos mais citados na conversa"
+{"intent": "aggregation", "keywords": ["jogos"], "dateRange": {"start": null, "end": null}}
+
+Query: "o que falaram sobre o projeto delta ontem?"
+{"intent": "narrative", "keywords": ["projeto", "delta"], "dateRange": {"start": "ontem", "end": "ontem"}}
+
+Query: "top assuntos abordados"
+{"intent": "aggregation", "keywords": ["assuntos"], "dateRange": {"start": null, "end": null}}
+
+Query: "qual a senha do wifi"
+{"intent": "factual", "keywords": ["senha", "wifi"], "dateRange": {"start": null, "end": null}}
 
 Query: "${query}"
-
-Required JSON schema:
-{
-  "intent": "factual" | "aggregation" | "narrative" | "unknown",
-  "keywords": ["keyword1"],
-  "dateRange": {
-    "start": string | null,
-    "end": string | null
-  }
-}`;
+`;
 
     const options: GenerateOptions = {
-      temperature: 0.1,
+      temperature: 0.05,
       maxTokens: 150,
-      systemPrompt: "You are a headless JSON API. Respond only with raw JSON."
+      systemPrompt: "You are a headless JSON API. Respond only with valid JSON. Never output conversational text."
     };
 
     const res = await this.generateJson<ClassifiedQuery>(prompt, options, 3);
@@ -245,21 +252,27 @@ Required JSON schema:
   }
 
   async expandKeywords(keywords: string[]): Promise<string[]> {
-    const prompt = `You are a strict linguistic expansion tool. You must respond ONLY with a valid JSON object.
-Expand the following keywords with up to 3 common pt-BR synonyms, internet slang, or abbreviations used in chat logs. If it's a game or common topic, include variations (e.g. "cs" -> "csgo", "counter strike").
-Do not explain, just return the JSON.
+    const prompt = `You are a linguistic expansion tool for Portuguese chat logs. Output ONLY raw JSON.
+Expand the keywords with exactly 3 common pt-BR synonyms, internet slang, or abbreviations. 
+Crucially: If a keyword is a Category/Class (like "jogos", "pessoas", "lugares", "topicos"), you MUST include its direct English translation (e.g. "game", "person", "place", "topic") so it matches our system's internal database classification schema.
+
+Examples:
+Keywords: ["jogos"]
+{"expanded": ["game", "videogame", "play"]}
+
+Keywords: ["pessoas"]
+{"expanded": ["person", "alguém", "galera"]}
+
+Keywords: ["risada", "engraçado"]
+{"expanded": ["kkk", "haha", "rsrs"]}
 
 Keywords: ${JSON.stringify(keywords)}
-
-Required JSON schema:
-{
-  "expanded": ["keyword1", "synonym1", "slang1"]
-}`;
+`;
 
     const options: GenerateOptions = {
-      temperature: 0.4,
-      maxTokens: 150,
-      systemPrompt: "You are a headless JSON API. Respond only with raw JSON."
+      temperature: 0.3,
+      maxTokens: 100,
+      systemPrompt: "You are a headless JSON API. You MUST respond with exactly this JSON schema: {\"expanded\": [\"str\", \"str\"]}"
     };
 
     try {

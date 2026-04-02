@@ -48,10 +48,10 @@ export const MODEL_REGISTRY = {
   worker: {
     key: 'worker',
     name: 'LFM2.5 350M',
-    uri: 'hf:lmstudio-community/LFM2.5-350M-GGUF:Q4_K_M',
-    sizeEstimate: 200_000_000,
+    uri: 'hf:lmstudio-community/LFM2.5-350M-GGUF:Q8_0',
+    sizeEstimate: 379_000_000,
     purpose: 'generation',
-    quantization: 'Q4_K_M',
+    quantization: 'Q8_0',
   },
 
   /**
@@ -59,9 +59,9 @@ export const MODEL_REGISTRY = {
    */
   worker_fallback: {
     key: 'worker_fallback',
-    name: 'Gemma 3 270M IT',
-    uri: 'hf:bartowski/google_gemma-3-270m-it-GGUF:Q4_K_M',
-    sizeEstimate: 150_000_000,
+    name: 'Llama 3.2 1B IT',
+    uri: 'hf:bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M',
+    sizeEstimate: 800_000_000,
     purpose: 'generation',
     quantization: 'Q4_K_M',
   },
@@ -73,7 +73,7 @@ export const MODEL_REGISTRY = {
     key: 'brain',
     name: 'Qwen 3.5 4B',
     uri: 'hf:lmstudio-community/Qwen3.5-4B-GGUF:Q4_K_M',
-    sizeEstimate: 2_500_000_000, // ~2.5GB
+    sizeEstimate: 2_710_000_000, // ~2.71GB
     purpose: 'generation',
     quantization: 'Q4_K_M',
   },

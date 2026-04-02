@@ -37,28 +37,35 @@ export class SearchService {
     console.log(`[SearchService] Intent: ${classification.intent} | Keywords: ${classification.keywords.join(', ')}`);
 
     const intent = classification.intent;
-    const keywords = (classification.keywords && classification.keywords.length > 0) ? classification.keywords : [query];
+    const initialKeywords = (classification.keywords && classification.keywords.length > 0) ? classification.keywords : [query];
     
     const dbOptions: { dateFrom?: number, dateTo?: number } = {
       dateFrom: options?.dateFrom,
       dateTo: options?.dateTo
     };
 
-    let results = this.performRouting(intent, keywords, dbOptions);
+    console.log(`[SearchService] Executing Ontology Hop (Entity Expansion)...`);
+    // 1. Proactive Lexical Expansion
+    const expandedKeywords = await worker.expandKeywords(initialKeywords);
+    const combinedKeywords = Array.from(new Set([...initialKeywords, ...expandedKeywords]));
 
-    // Lexical Expansion Backoff (Task 4.2)
+    // 2. Proactive Entity-Graph Binding
+    // By searching the entities table first, we bridge the semantic gap.
+    // If the keyword is "game", this returns ["valorant", "gta"] because they are typed as "game".
+    const topEntities = this.sessionRepo.searchAggregation(combinedKeywords, 8, dbOptions);
+    const entityNames = topEntities.map(e => e.name);
+
+    if (entityNames.length > 0) {
+      console.log(`[SearchService] Ontology hop discovered relevant context entities: ${entityNames.join(', ')}`);
+    }
+
+    // 3. The Ultimate Deterministic FTS Query
+    const finalKeywords = Array.from(new Set([...combinedKeywords, ...entityNames]));
+
+    let results = this.performRouting(intent, finalKeywords, dbOptions);
+
     if (results.length === 0) {
-      console.log(`[SearchService] Zero hits for "${query}". Triggering Lexical Expansion via Worker...`);
-      const expandedKeywords = await worker.expandKeywords(keywords);
-      
-      if (expandedKeywords.length > keywords.length || expandedKeywords.some(k => !keywords.includes(k))) {
-        console.log(`[SearchService] Retry FTS with expanded keywords: ${expandedKeywords.join(', ')}`);
-        results = this.performRouting(intent, expandedKeywords, dbOptions);
-      }
-      
-      if (results.length === 0) {
-        console.warn(`[SearchService] Data inexistent after lexical expansion.`);
-      }
+      console.warn(`[SearchService] Data inexistent even after lexical and ontological expansions.`);
     }
 
     return results;

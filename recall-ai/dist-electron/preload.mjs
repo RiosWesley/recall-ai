@@ -48,6 +48,11 @@ electron.contextBridge.exposeInMainWorld("api", {
     electron.ipcRenderer.on("rag:token", listener);
     return () => electron.ipcRenderer.off("rag:token", listener);
   },
+  onRAGStep(cb) {
+    const listener = (_event, step) => cb(step);
+    electron.ipcRenderer.on("rag:step", listener);
+    return () => electron.ipcRenderer.off("rag:step", listener);
+  },
   onRAGDone(cb) {
     const listener = (_event, response) => cb(response);
     electron.ipcRenderer.on("rag:done", listener);
