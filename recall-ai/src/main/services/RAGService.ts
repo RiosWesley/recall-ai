@@ -30,7 +30,6 @@ export class RAGService {
 
       const searchStart = performance.now()
       
-      // Temporary fallback search call until Task 4.1 routing is complete
       context = await SearchService.getInstance().search(question, { 
         limit: config.topK, 
         chatId: options?.chatId 
@@ -41,7 +40,7 @@ export class RAGService {
       if (context.length === 0) {
         latency.total = performance.now() - totalStart
         return {
-          answer: 'Aguardando implementação da Fase 4.1 (Motor FTS5) para buscas completas.',
+          answer: 'Dados inexistentes. Não foi possível localizar o contexto ou menções referentes à sua busca neste chat.',
           context,
           tokensUsed: 0,
           latency

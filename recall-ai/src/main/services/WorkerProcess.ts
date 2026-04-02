@@ -244,6 +244,36 @@ Required JSON schema:
     return res;
   }
 
+  async expandKeywords(keywords: string[]): Promise<string[]> {
+    const prompt = `You are a strict linguistic expansion tool. You must respond ONLY with a valid JSON object.
+Expand the following keywords with up to 3 common pt-BR synonyms, internet slang, or abbreviations used in chat logs. If it's a game or common topic, include variations (e.g. "cs" -> "csgo", "counter strike").
+Do not explain, just return the JSON.
+
+Keywords: ${JSON.stringify(keywords)}
+
+Required JSON schema:
+{
+  "expanded": ["keyword1", "synonym1", "slang1"]
+}`;
+
+    const options: GenerateOptions = {
+      temperature: 0.4,
+      maxTokens: 150,
+      systemPrompt: "You are a headless JSON API. Respond only with raw JSON."
+    };
+
+    try {
+      const res = await this.generateJson<{expanded: string[]}>(prompt, options, 2);
+      if (res.expanded && Array.isArray(res.expanded)) {
+        // Return original keywords plus expanded, deduplicated
+        return Array.from(new Set([...keywords, ...res.expanded]));
+      }
+    } catch(e) {
+      console.warn('[WorkerProcess] Failed to expand keywords', e);
+    }
+    return keywords;
+  }
+
   private async processNextInQueue() {
     if (this.processingQueue || this.batchQueue.length === 0) return;
     this.processingQueue = true;

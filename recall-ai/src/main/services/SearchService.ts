@@ -44,6 +44,27 @@ export class SearchService {
       dateTo: options?.dateTo
     };
 
+    let results = this.performRouting(intent, keywords, dbOptions);
+
+    // Lexical Expansion Backoff (Task 4.2)
+    if (results.length === 0) {
+      console.log(`[SearchService] Zero hits for "${query}". Triggering Lexical Expansion via Worker...`);
+      const expandedKeywords = await worker.expandKeywords(keywords);
+      
+      if (expandedKeywords.length > keywords.length || expandedKeywords.some(k => !keywords.includes(k))) {
+        console.log(`[SearchService] Retry FTS with expanded keywords: ${expandedKeywords.join(', ')}`);
+        results = this.performRouting(intent, expandedKeywords, dbOptions);
+      }
+      
+      if (results.length === 0) {
+        console.warn(`[SearchService] Data inexistent after lexical expansion.`);
+      }
+    }
+
+    return results;
+  }
+
+  private performRouting(intent: string, keywords: string[], dbOptions: { dateFrom?: number, dateTo?: number }): SearchResult[] {
     const results: SearchResult[] = [];
 
     // 2. Routing
