@@ -768,7 +768,7 @@ src/main/services/
 
 ---
 
-## [ ] TASK 5.1 — Chat Interativo e Expanded Citations 
+## [x] TASK 5.1 — Chat Interativo e Expanded Citations 
 
 **Objetivo:** Renovar o layout Frontend (App.tsx / Chat.tsx) focando em Transparência Operacional — Evidenciar como a Engine buscou.
 

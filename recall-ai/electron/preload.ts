@@ -70,6 +70,12 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.off('rag:token', listener)
   },
 
+  onRAGStep(cb: (step: import('../src/shared/types').RAGStep) => void): () => void {
+    const listener = (_event: Electron.IpcRendererEvent, step: import('../src/shared/types').RAGStep) => cb(step)
+    ipcRenderer.on('rag:step', listener)
+    return () => ipcRenderer.off('rag:step', listener)
+  },
+
   onRAGDone(cb: (response: import('../src/shared/types').RAGResponse) => void): () => void {
     const listener = (_event: Electron.IpcRendererEvent, response: import('../src/shared/types').RAGResponse) => cb(response)
     ipcRenderer.on('rag:done', listener)

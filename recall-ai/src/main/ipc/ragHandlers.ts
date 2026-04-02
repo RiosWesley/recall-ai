@@ -12,7 +12,10 @@ export function registerRagHandlers(win: BrowserWindow) {
         (token) => {
           win.webContents.send('rag:token', token)
         },
-        options
+        options,
+        (step) => {
+          win.webContents.send('rag:step', step)
+        }
       )
 
       win.webContents.send('rag:done', response)

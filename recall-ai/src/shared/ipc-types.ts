@@ -51,6 +51,7 @@ export interface ElectronAPI {
 
   // ── RAG ─────────────────────────────────────────────────────────────────────
   askRAG(question: string, options?: import('./types').RAGOptions): Promise<void>
+  onRAGStep(cb: (step: import('./types').RAGStep) => void): () => void
   onRAGToken(cb: (token: string) => void): () => void
   onRAGDone(cb: (response: import('./types').RAGResponse) => void): () => void
 

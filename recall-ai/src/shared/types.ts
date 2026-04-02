@@ -241,6 +241,8 @@ export interface RAGLatency {
   total: number
 }
 
+export type RAGStep = 'booting' | 'searching' | 'processing' | 'synthesizing'
+
 export interface RAGOptions {
   chatId?: string
   temperature?: number

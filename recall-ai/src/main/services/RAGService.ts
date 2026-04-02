@@ -19,15 +19,18 @@ export class RAGService {
   async generateStream(
     question: string,
     onToken: (token: string) => void,
-    options?: RAGOptions
+    options?: RAGOptions,
+    onStep?: (step: import('../../shared/types').RAGStep) => void
   ): Promise<RAGResponse> {
     const totalStart = performance.now()
     const latency: RAGLatency = { embedding: 0, search: 0, generation: 0, total: 0 }
     let context: SearchResult[] = []
 
     try {
+      if (onStep) onStep('booting')
       const config = SettingsService.getInstance().get()
 
+      if (onStep) onStep('searching')
       const searchStart = performance.now()
       
       context = await SearchService.getInstance().search(question, { 
@@ -48,10 +51,12 @@ export class RAGService {
       }
 
       // 4. Prompt Construction
+      if (onStep) onStep('processing')
       const { userPrompt } = promptTemplates.buildRAGPrompt(question, context)
       const systemPrompt = config.systemPrompt
 
       // 5. Generation
+      if (onStep) onStep('synthesizing')
       const generationStart = performance.now()
       const brainProcess = BrainProcess.getInstance()
       
