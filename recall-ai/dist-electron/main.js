@@ -1,18 +1,17 @@
-var __defProp = Object.defineProperty;
-var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
-import { app, ipcMain, utilityProcess, dialog, BrowserWindow } from "electron";
-import { fileURLToPath } from "node:url";
-import path, { basename } from "node:path";
-import Database from "better-sqlite3";
-import { webcrypto, createHash } from "node:crypto";
-import fs, { createReadStream } from "node:fs";
-import { createInterface } from "node:readline";
-import { resolveModelFile, createModelDownloader } from "node-llama-cpp";
-import fs$1 from "fs";
-import path$1 from "path";
-const MIGRATION_ID$6 = "001_initial";
-const SCHEMA_SQL$4 = `
+var Se = Object.defineProperty;
+var Ie = (n, e, t) => e in n ? Se(n, e, { enumerable: !0, configurable: !0, writable: !0, value: t }) : n[e] = t;
+var E = (n, e, t) => Ie(n, typeof e != "symbol" ? e + "" : e, t);
+import { app as O, ipcMain as f, utilityProcess as me, dialog as Ee, BrowserWindow as ue } from "electron";
+import { fileURLToPath as Q } from "node:url";
+import N, { basename as Re } from "node:path";
+import ye from "better-sqlite3";
+import { webcrypto as Z, createHash as Le } from "node:crypto";
+import ee, { createReadStream as K } from "node:fs";
+import { createInterface as pe } from "node:readline";
+import { resolveModelFile as $, createModelDownloader as Oe } from "node-llama-cpp";
+import W from "fs";
+import Ae from "path";
+const te = "001_initial", we = `
   -- ============================================================
   -- CHATS — imported WhatsApp conversations
   -- ============================================================
@@ -91,8 +90,7 @@ const SCHEMA_SQL$4 = `
   CREATE INDEX IF NOT EXISTS idx_messages_sender    ON messages(sender);
   CREATE INDEX IF NOT EXISTS idx_chunks_chat        ON chunks(chat_id);
   CREATE INDEX IF NOT EXISTS idx_chunks_time        ON chunks(start_time, end_time);
-`;
-const VIRTUAL_TABLES_SQL$2 = `
+`, De = `
   -- ============================================================
   -- VECTORS — sqlite-vec KNN (created only if extension loaded)
   -- ============================================================
@@ -109,57 +107,40 @@ const VIRTUAL_TABLES_SQL$2 = `
     chunk_id UNINDEXED,
     tokenize='unicode61'
   );
-`;
-const FTS5_ONLY_SQL$2 = `
+`, ke = `
   -- FTS5 table only (when sqlite-vec not available)
   CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
     content,
     chunk_id UNINDEXED,
     tokenize='unicode61'
   );
-`;
-const MIGRATIONS_TABLE_SQL = `
+`, Fe = `
   CREATE TABLE IF NOT EXISTS _migrations (
     id TEXT PRIMARY KEY,
     applied_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
   );
 `;
-function runMigrations(db) {
-  db.exec(MIGRATIONS_TABLE_SQL);
-  const existing = db.prepare(
+function Ue(n) {
+  if (n.exec(Fe), n.prepare(
     "SELECT id FROM _migrations WHERE id = ?"
-  ).get(MIGRATION_ID$6);
-  if (existing) {
+  ).get(te)) {
     console.log("[DB] Migration 001_initial already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 001_initial...");
-  db.transaction(() => {
-    db.exec(SCHEMA_SQL$4);
-    const hasSqliteVec = isSqliteVecLoaded$3(db);
-    if (hasSqliteVec) {
-      console.log("[DB] sqlite-vec detected — creating vectors + chunks_fts tables");
-      db.exec(VIRTUAL_TABLES_SQL$2);
-    } else {
-      console.log("[DB] sqlite-vec not detected — creating chunks_fts only");
-      db.exec(FTS5_ONLY_SQL$2);
-    }
-    db.prepare(
+  console.log("[DB] Running migration 001_initial..."), n.transaction(() => {
+    n.exec(we), Ce(n) ? (console.log("[DB] sqlite-vec detected — creating vectors + chunks_fts tables"), n.exec(De)) : (console.log("[DB] sqlite-vec not detected — creating chunks_fts only"), n.exec(ke)), n.prepare(
       "INSERT INTO _migrations (id) VALUES (?)"
-    ).run(MIGRATION_ID$6);
-  })();
-  console.log("[DB] Migration 001_initial complete");
+    ).run(te);
+  })(), console.log("[DB] Migration 001_initial complete");
 }
-function isSqliteVecLoaded$3(db) {
+function Ce(n) {
   try {
-    db.prepare("SELECT vec_version()").get();
-    return true;
+    return n.prepare("SELECT vec_version()").get(), !0;
   } catch {
-    return false;
+    return !1;
   }
 }
-const MIGRATION_ID$5 = "002_add_profile_facts";
-const SCHEMA_SQL$3 = `
+const se = "002_add_profile_facts", xe = `
   -- ============================================================
   -- PROFILE FACTS — synthetic sentences about conversation patterns
   -- ============================================================
@@ -175,8 +156,7 @@ const SCHEMA_SQL$3 = `
 
   -- Index to speed up retrieval by contact
   CREATE INDEX IF NOT EXISTS idx_profile_facts_contact ON profile_facts(contact_id);
-`;
-const FTS5_SQL = `
+`, Pe = `
   -- FTS5 table for profile_facts mapping rowid to id
   CREATE VIRTUAL TABLE IF NOT EXISTS profile_facts_fts USING fts5(
     text,
@@ -194,8 +174,7 @@ const FTS5_SQL = `
   BEGIN
     DELETE FROM profile_facts_fts WHERE fact_id = old.id;
   END;
-`;
-const VECTORS_SQL = `
+`, Me = `
   -- SQLite-vec table for semantic search on profile_facts
   -- Use vec0 for dynamic loading
   CREATE VIRTUAL TABLE IF NOT EXISTS profile_facts_vectors USING vec0(
@@ -203,38 +182,27 @@ const VECTORS_SQL = `
     embedding FLOAT[768]
   );
 `;
-function runMigration002(db) {
-  const existing = db.prepare(
+function be(n) {
+  if (n.prepare(
     "SELECT id FROM _migrations WHERE id = ?"
-  ).get(MIGRATION_ID$5);
-  if (existing) {
+  ).get(se)) {
     console.log("[DB] Migration 002_add_profile_facts already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 002_add_profile_facts...");
-  db.transaction(() => {
-    db.exec(SCHEMA_SQL$3);
-    db.exec(FTS5_SQL);
-    if (isSqliteVecLoaded$2(db)) {
-      console.log("[DB] sqlite-vec detected — creating profile_facts_vectors table");
-      db.exec(VECTORS_SQL);
-    }
-    db.prepare(
+  console.log("[DB] Running migration 002_add_profile_facts..."), n.transaction(() => {
+    n.exec(xe), n.exec(Pe), ve(n) && (console.log("[DB] sqlite-vec detected — creating profile_facts_vectors table"), n.exec(Me)), n.prepare(
       "INSERT INTO _migrations (id) VALUES (?)"
-    ).run(MIGRATION_ID$5);
-  })();
-  console.log("[DB] Migration 002_add_profile_facts complete");
+    ).run(se);
+  })(), console.log("[DB] Migration 002_add_profile_facts complete");
 }
-function isSqliteVecLoaded$2(db) {
+function ve(n) {
   try {
-    db.prepare("SELECT vec_version()").get();
-    return true;
+    return n.prepare("SELECT vec_version()").get(), !0;
   } catch {
-    return false;
+    return !1;
   }
 }
-const MIGRATION_ID$4 = "003_add_contact_profiles";
-const SCHEMA_SQL$2 = `
+const ne = "003_add_contact_profiles", Be = `
   -- ============================================================
   -- CONTACT PROFILES — Generated by LLM Map-Reduce pipeline
   -- ============================================================
@@ -273,25 +241,20 @@ const SCHEMA_SQL$2 = `
 
   CREATE INDEX IF NOT EXISTS idx_block_summaries_contact ON block_summaries(contact_id);
 `;
-function runMigration003(db) {
-  const existing = db.prepare(
+function Xe(n) {
+  if (n.prepare(
     "SELECT id FROM _migrations WHERE id = ?"
-  ).get(MIGRATION_ID$4);
-  if (existing) {
+  ).get(ne)) {
     console.log("[DB] Migration 003_add_contact_profiles already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 003_add_contact_profiles...");
-  db.transaction(() => {
-    db.exec(SCHEMA_SQL$2);
-    db.prepare(
+  console.log("[DB] Running migration 003_add_contact_profiles..."), n.transaction(() => {
+    n.exec(Be), n.prepare(
       "INSERT INTO _migrations (id) VALUES (?)"
-    ).run(MIGRATION_ID$4);
-  })();
-  console.log("[DB] Migration 003_add_contact_profiles complete");
+    ).run(ne);
+  })(), console.log("[DB] Migration 003_add_contact_profiles complete");
 }
-const MIGRATION_ID$3 = "004_parent_child_chunks";
-const SCHEMA_SQL$1 = `
+const ae = "004_parent_child_chunks", Ge = `
   -- ============================================================
   -- PARENT CHUNKS — contexto completo retornado ao LLM
   -- ============================================================
@@ -327,8 +290,7 @@ const SCHEMA_SQL$1 = `
   CREATE INDEX IF NOT EXISTS idx_parent_chunks_chat ON parent_chunks(chat_id);
   CREATE INDEX IF NOT EXISTS idx_child_chunks_parent ON child_chunks(parent_id);
   CREATE INDEX IF NOT EXISTS idx_child_chunks_time ON child_chunks(start_time, end_time);
-`;
-const VIRTUAL_TABLES_SQL$1 = `
+`, ze = `
   -- ============================================================
   -- VECTORS — child embeddings via sqlite-vec
   -- ============================================================
@@ -345,44 +307,30 @@ const VIRTUAL_TABLES_SQL$1 = `
     chunk_id UNINDEXED,
     tokenize='unicode61'
   );
-`;
-const FTS5_ONLY_SQL$1 = `
+`, Ye = `
   CREATE VIRTUAL TABLE IF NOT EXISTS child_chunks_fts USING fts5(
     content,
     chunk_id UNINDEXED,
     tokenize='unicode61'
   );
 `;
-function runMigration004(db) {
-  const existing = db.prepare("SELECT id FROM _migrations WHERE id = ?").get(MIGRATION_ID$3);
-  if (existing) {
+function $e(n) {
+  if (n.prepare("SELECT id FROM _migrations WHERE id = ?").get(ae)) {
     console.log("[DB] Migration 004_parent_child_chunks already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 004_parent_child_chunks...");
-  db.transaction(() => {
-    db.exec(SCHEMA_SQL$1);
-    if (isSqliteVecLoaded$1(db)) {
-      console.log("[DB] sqlite-vec detected — creating child_vectors + child_chunks_fts tables");
-      db.exec(VIRTUAL_TABLES_SQL$1);
-    } else {
-      console.log("[DB] sqlite-vec not detected — creating child_chunks_fts only");
-      db.exec(FTS5_ONLY_SQL$1);
-    }
-    db.prepare("INSERT INTO _migrations (id) VALUES (?)").run(MIGRATION_ID$3);
-  })();
-  console.log("[DB] Migration 004_parent_child_chunks complete");
+  console.log("[DB] Running migration 004_parent_child_chunks..."), n.transaction(() => {
+    n.exec(Ge), We(n) ? (console.log("[DB] sqlite-vec detected — creating child_vectors + child_chunks_fts tables"), n.exec(ze)) : (console.log("[DB] sqlite-vec not detected — creating child_chunks_fts only"), n.exec(Ye)), n.prepare("INSERT INTO _migrations (id) VALUES (?)").run(ae);
+  })(), console.log("[DB] Migration 004_parent_child_chunks complete");
 }
-function isSqliteVecLoaded$1(db) {
+function We(n) {
   try {
-    db.prepare("SELECT vec_version()").get();
-    return true;
+    return n.prepare("SELECT vec_version()").get(), !0;
   } catch {
-    return false;
+    return !1;
   }
 }
-const MIGRATION_ID$2 = "005_propositions";
-const SCHEMA_SQL = `
+const ie = "005_propositions", qe = `
   -- ============================================================
   -- PROPOSITIONS — extracted facts from parent chunks
   -- ============================================================
@@ -400,8 +348,7 @@ const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_propositions_chat ON propositions(chat_id);
   CREATE INDEX IF NOT EXISTS idx_propositions_parent ON propositions(parent_chunk_id);
-`;
-const VIRTUAL_TABLES_SQL = `
+`, He = `
   -- ============================================================
   -- VECTORS — propositions embeddings via sqlite-vec
   -- ============================================================
@@ -419,8 +366,7 @@ const VIRTUAL_TABLES_SQL = `
     proposition_id UNINDEXED,
     tokenize='unicode61 remove_diacritics 2'
   );
-`;
-const FTS5_ONLY_SQL = `
+`, Ve = `
   CREATE VIRTUAL TABLE IF NOT EXISTS propositions_fts USING fts5(
     fact,
     original_quote,
@@ -428,36 +374,23 @@ const FTS5_ONLY_SQL = `
     tokenize='unicode61 remove_diacritics 2'
   );
 `;
-function runMigration005(db) {
-  const existing = db.prepare("SELECT id FROM _migrations WHERE id = ?").get(MIGRATION_ID$2);
-  if (existing) {
+function je(n) {
+  if (n.prepare("SELECT id FROM _migrations WHERE id = ?").get(ie)) {
     console.log("[DB] Migration 005_propositions already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 005_propositions...");
-  db.transaction(() => {
-    db.exec(SCHEMA_SQL);
-    if (isSqliteVecLoaded(db)) {
-      console.log("[DB] sqlite-vec detected — creating proposition_vectors + propositions_fts tables");
-      db.exec(VIRTUAL_TABLES_SQL);
-    } else {
-      console.log("[DB] sqlite-vec not detected — creating propositions_fts only");
-      db.exec(FTS5_ONLY_SQL);
-    }
-    db.prepare("INSERT INTO _migrations (id) VALUES (?)").run(MIGRATION_ID$2);
-  })();
-  console.log("[DB] Migration 005_propositions complete");
+  console.log("[DB] Running migration 005_propositions..."), n.transaction(() => {
+    n.exec(qe), Qe(n) ? (console.log("[DB] sqlite-vec detected — creating proposition_vectors + propositions_fts tables"), n.exec(He)) : (console.log("[DB] sqlite-vec not detected — creating propositions_fts only"), n.exec(Ve)), n.prepare("INSERT INTO _migrations (id) VALUES (?)").run(ie);
+  })(), console.log("[DB] Migration 005_propositions complete");
 }
-function isSqliteVecLoaded(db) {
+function Qe(n) {
   try {
-    db.prepare("SELECT vec_version()").get();
-    return true;
+    return n.prepare("SELECT vec_version()").get(), !0;
   } catch {
-    return false;
+    return !1;
   }
 }
-const MIGRATION_ID$1 = "006_intelligent_ingestion";
-const DROP_AND_RECREATE_SQL = `
+const re = "006_intelligent_ingestion", Ke = `
   -- We drop vector and chunks tables since we are moving away from vector embeddings and strict token chunks
   DROP TABLE IF EXISTS proposition_vectors;
   DROP TABLE IF EXISTS fact_vectors;
@@ -521,21 +454,16 @@ const DROP_AND_RECREATE_SQL = `
   CREATE INDEX IF NOT EXISTS idx_sessions_time ON sessions(start_time, end_time);
   CREATE INDEX IF NOT EXISTS idx_entities_session ON entities(session_id);
 `;
-function runMigration006(db) {
-  const existing = db.prepare("SELECT id FROM _migrations WHERE id = ?").get(MIGRATION_ID$1);
-  if (existing) {
+function Je(n) {
+  if (n.prepare("SELECT id FROM _migrations WHERE id = ?").get(re)) {
     console.log("[DB] Migration 006_intelligent_ingestion already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 006_intelligent_ingestion...");
-  db.transaction(() => {
-    db.exec(DROP_AND_RECREATE_SQL);
-    db.prepare("INSERT INTO _migrations (id) VALUES (?)").run(MIGRATION_ID$1);
-  })();
-  console.log("[DB] Migration 006_intelligent_ingestion complete");
+  console.log("[DB] Running migration 006_intelligent_ingestion..."), n.transaction(() => {
+    n.exec(Ke), n.prepare("INSERT INTO _migrations (id) VALUES (?)").run(re);
+  })(), console.log("[DB] Migration 006_intelligent_ingestion complete");
 }
-const MIGRATION_ID = "007_search_indexes";
-const MIGRATION_SQL = `
+const oe = "007_search_indexes", Ze = `
   -- Cria VIRTUAL TABLE para permitir busca rapida FTS5 nas mensagens individuais
   CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     sender,
@@ -566,91 +494,56 @@ const MIGRATION_SQL = `
     VALUES (new.sender, new.content, new.id);
   END;
 `;
-function runMigration007(db) {
-  const existing = db.prepare("SELECT id FROM _migrations WHERE id = ?").get(MIGRATION_ID);
-  if (existing) {
+function et(n) {
+  if (n.prepare("SELECT id FROM _migrations WHERE id = ?").get(oe)) {
     console.log("[DB] Migration 007_search_indexes already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 007_search_indexes...");
-  db.transaction(() => {
-    db.exec(MIGRATION_SQL);
-    db.prepare("INSERT INTO _migrations (id) VALUES (?)").run(MIGRATION_ID);
-  })();
-  console.log("[DB] Migration 007_search_indexes complete");
+  console.log("[DB] Running migration 007_search_indexes..."), n.transaction(() => {
+    n.exec(Ze), n.prepare("INSERT INTO _migrations (id) VALUES (?)").run(oe);
+  })(), console.log("[DB] Migration 007_search_indexes complete");
 }
-const _DatabaseService = class _DatabaseService {
+const S = class S {
   static getInstance() {
-    if (_DatabaseService.db) {
-      return _DatabaseService.db;
-    }
-    const userDataPath = app.getPath("userData");
-    const dbPath = path.join(userDataPath, "recall-ai.db");
-    console.log("[DB] Opening database at:", dbPath);
-    const db = new Database(dbPath, {
+    if (S.db)
+      return S.db;
+    const e = O.getPath("userData"), t = N.join(e, "recall-ai.db");
+    console.log("[DB] Opening database at:", t);
+    const s = new ye(t, {
       verbose: process.env.NODE_ENV === "development" ? console.log : void 0
     });
-    db.pragma("journal_mode = WAL");
-    db.pragma("foreign_keys = ON");
-    db.pragma("synchronous = NORMAL");
-    db.pragma("cache_size = -32000");
-    db.pragma("temp_store = MEMORY");
-    _DatabaseService.db = db;
-    runMigrations(db);
-    runMigration002(db);
-    runMigration003(db);
-    runMigration004(db);
-    runMigration005(db);
-    runMigration006(db);
-    runMigration007(db);
-    console.log("[DB] Database ready");
-    return db;
+    return s.pragma("journal_mode = WAL"), s.pragma("foreign_keys = ON"), s.pragma("synchronous = NORMAL"), s.pragma("cache_size = -32000"), s.pragma("temp_store = MEMORY"), S.db = s, Ue(s), be(s), Xe(s), $e(s), je(s), Je(s), et(s), console.log("[DB] Database ready"), s;
   }
   /** Close the database connection (call on app quit) */
   static close() {
-    if (_DatabaseService.db) {
-      _DatabaseService.db.close();
-      _DatabaseService.db = null;
-      console.log("[DB] Database closed");
-    }
+    S.db && (S.db.close(), S.db = null, console.log("[DB] Database closed"));
   }
   /** Check if the database is open */
   static isOpen() {
-    return _DatabaseService.db !== null && _DatabaseService.db.open;
+    return S.db !== null && S.db.open;
   }
 };
-__publicField(_DatabaseService, "db", null);
-let DatabaseService = _DatabaseService;
-let urlAlphabet = "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
-const POOL_SIZE_MULTIPLIER = 128;
-let pool, poolOffset;
-function fillPool(bytes) {
-  if (!pool || pool.length < bytes) {
-    pool = Buffer.allocUnsafe(bytes * POOL_SIZE_MULTIPLIER);
-    webcrypto.getRandomValues(pool);
-    poolOffset = 0;
-  } else if (poolOffset + bytes > pool.length) {
-    webcrypto.getRandomValues(pool);
-    poolOffset = 0;
-  }
-  poolOffset += bytes;
+E(S, "db", null);
+let R = S, tt = "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
+const st = 128;
+let w, M;
+function nt(n) {
+  !w || w.length < n ? (w = Buffer.allocUnsafe(n * st), Z.getRandomValues(w), M = 0) : M + n > w.length && (Z.getRandomValues(w), M = 0), M += n;
 }
-function nanoid(size = 21) {
-  fillPool(size |= 0);
-  let id = "";
-  for (let i = poolOffset - size; i < poolOffset; i++) {
-    id += urlAlphabet[pool[i] & 63];
-  }
-  return id;
+function _(n = 21) {
+  nt(n |= 0);
+  let e = "";
+  for (let t = M - n; t < M; t++)
+    e += tt[w[t] & 63];
+  return e;
 }
-class ChatRepository {
-  constructor(db) {
-    this.db = db;
+class b {
+  constructor(e) {
+    this.db = e;
   }
-  create(chat) {
-    const id = chat.id ?? nanoid();
-    const now = Math.floor(Date.now() / 1e3);
-    this.db.prepare(`
+  create(e) {
+    const t = e.id ?? _(), s = Math.floor(Date.now() / 1e3);
+    return this.db.prepare(`
       INSERT INTO chats (
         id, name, source, participant_count, message_count,
         first_message_at, last_message_at, imported_at, file_hash, metadata
@@ -659,140 +552,130 @@ class ChatRepository {
         @first_message_at, @last_message_at, @imported_at, @file_hash, @metadata
       )
     `).run({
-      id,
-      name: chat.name,
-      source: chat.source ?? "whatsapp",
-      participant_count: chat.participant_count ?? null,
-      message_count: chat.message_count ?? 0,
-      first_message_at: chat.first_message_at ?? null,
-      last_message_at: chat.last_message_at ?? null,
-      imported_at: now,
-      file_hash: chat.file_hash ?? null,
-      metadata: chat.metadata ? JSON.stringify(chat.metadata) : null
-    });
-    return this.findById(id);
+      id: t,
+      name: e.name,
+      source: e.source ?? "whatsapp",
+      participant_count: e.participant_count ?? null,
+      message_count: e.message_count ?? 0,
+      first_message_at: e.first_message_at ?? null,
+      last_message_at: e.last_message_at ?? null,
+      imported_at: s,
+      file_hash: e.file_hash ?? null,
+      metadata: e.metadata ? JSON.stringify(e.metadata) : null
+    }), this.findById(t);
   }
   findAll() {
-    const rows = this.db.prepare(
+    return this.db.prepare(
       "SELECT * FROM chats ORDER BY imported_at DESC"
-    ).all();
-    return rows.map(deserializeChat);
+    ).all().map(ce);
   }
-  findById(id) {
-    const row = this.db.prepare(
+  findById(e) {
+    const t = this.db.prepare(
       "SELECT * FROM chats WHERE id = ?"
-    ).get(id);
-    return row ? deserializeChat(row) : null;
+    ).get(e);
+    return t ? ce(t) : null;
   }
-  delete(id) {
-    this.db.prepare("DELETE FROM chats WHERE id = ?").run(id);
+  delete(e) {
+    this.db.prepare("DELETE FROM chats WHERE id = ?").run(e);
   }
-  existsByHash(fileHash) {
-    const row = this.db.prepare(
+  existsByHash(e) {
+    return this.db.prepare(
       "SELECT id FROM chats WHERE file_hash = ?"
-    ).get(fileHash);
-    return row !== void 0;
+    ).get(e) !== void 0;
   }
-  updateMessageCount(id, count) {
+  updateMessageCount(e, t) {
     this.db.prepare(
       "UPDATE chats SET message_count = ? WHERE id = ?"
-    ).run(count, id);
+    ).run(t, e);
   }
-  updateParticipantCount(id, count) {
+  updateParticipantCount(e, t) {
     this.db.prepare(
       "UPDATE chats SET participant_count = ? WHERE id = ?"
-    ).run(count, id);
+    ).run(t, e);
   }
-  updateTimestamps(id, firstAt, lastAt) {
+  updateTimestamps(e, t, s) {
     this.db.prepare(
       "UPDATE chats SET first_message_at = ?, last_message_at = ? WHERE id = ?"
-    ).run(firstAt, lastAt, id);
+    ).run(t, s, e);
   }
 }
-function deserializeChat(row) {
+function ce(n) {
   return {
-    ...row,
-    metadata: row.metadata ? JSON.parse(row.metadata) : null
+    ...n,
+    metadata: n.metadata ? JSON.parse(n.metadata) : null
   };
 }
-class MessageRepository {
-  constructor(db) {
-    this.db = db;
+class J {
+  constructor(e) {
+    this.db = e;
   }
   /**
    * Insert a batch of messages in a single transaction.
    * Duplicate rows (same chat_id + timestamp + sender + content) are silently ignored.
    */
-  insertBatch(messages) {
-    if (messages.length === 0) return;
-    const insert = this.db.prepare(`
+  insertBatch(e) {
+    if (e.length === 0) return;
+    const t = this.db.prepare(`
       INSERT OR IGNORE INTO messages (id, chat_id, sender, content, timestamp, type, raw)
       VALUES (@id, @chat_id, @sender, @content, @timestamp, @type, @raw)
     `);
-    const runAll = this.db.transaction((msgs) => {
-      for (const msg of msgs) {
-        insert.run({
-          id: msg.id ?? nanoid(),
-          chat_id: msg.chat_id,
-          sender: msg.sender,
-          content: msg.content,
-          timestamp: msg.timestamp,
-          type: msg.type ?? "text",
-          raw: msg.raw ?? null
+    this.db.transaction((a) => {
+      for (const r of a)
+        t.run({
+          id: r.id ?? _(),
+          chat_id: r.chat_id,
+          sender: r.sender,
+          content: r.content,
+          timestamp: r.timestamp,
+          type: r.type ?? "text",
+          raw: r.raw ?? null
         });
-      }
-    });
-    runAll(messages);
+    })(e);
   }
-  findByChatId(chatId, limit = 1e3, offset = 0) {
+  findByChatId(e, t = 1e3, s = 0) {
     return this.db.prepare(`
       SELECT * FROM messages
       WHERE chat_id = ?
       ORDER BY timestamp ASC
       LIMIT ? OFFSET ?
-    `).all(chatId, limit, offset);
+    `).all(e, t, s);
   }
-  countByChatId(chatId) {
-    const row = this.db.prepare(
+  countByChatId(e) {
+    return this.db.prepare(
       "SELECT COUNT(*) as count FROM messages WHERE chat_id = ?"
-    ).get(chatId);
-    return row.count;
+    ).get(e).count;
   }
   /**
    * Returns unique sender names for a given chat, ordered by message count.
    */
-  getParticipants(chatId) {
-    const rows = this.db.prepare(`
+  getParticipants(e) {
+    return this.db.prepare(`
       SELECT DISTINCT sender
       FROM messages
       WHERE chat_id = ? AND type != 'system'
       GROUP BY sender
       ORDER BY COUNT(*) DESC
-    `).all(chatId);
-    return rows.map((r) => r.sender);
+    `).all(e).map((s) => s.sender);
   }
-  deleteByChatId(chatId) {
-    this.db.prepare("DELETE FROM messages WHERE chat_id = ?").run(chatId);
+  deleteByChatId(e) {
+    this.db.prepare("DELETE FROM messages WHERE chat_id = ?").run(e);
   }
   /**
    * Factual Search (Task 4.1): Uses FTS5 to find matches and extracts a
    * sliding window of surrounding messages (+/- windowSize).
    */
-  searchFactual(keywords, windowSize = 15, limit = 5) {
-    if (!keywords || keywords.length === 0) return [];
-    const cleanTokens = keywords.map((k) => k.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, "").trim()).filter(Boolean);
-    if (cleanTokens.length === 0) return [];
-    const matchQuery = cleanTokens.map((k) => `"${k}"*`).join(" OR ");
-    const pivots = this.db.prepare(`
+  searchFactual(e, t = 15, s = 5) {
+    if (!e || e.length === 0) return [];
+    const a = e.map((c) => c.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, "").trim()).filter(Boolean);
+    if (a.length === 0) return [];
+    const r = a.map((c) => `"${c}"*`).join(" OR "), i = this.db.prepare(`
       SELECT m.id, m.chat_id, m.timestamp 
       FROM messages_fts fts
       JOIN messages m ON fts.message_id = m.id
       WHERE messages_fts MATCH ?
       ORDER BY fts.rank
       LIMIT ?
-    `).all(matchQuery, limit);
-    const windows = [];
-    const fetchWindow = this.db.prepare(`
+    `).all(r, s), o = [], d = this.db.prepare(`
       SELECT * FROM (
         SELECT * FROM messages 
         WHERE chat_id = ? AND timestamp <= ? 
@@ -806,269 +689,205 @@ class MessageRepository {
       )
       ORDER BY timestamp ASC
     `);
-    for (const p of pivots) {
-      const windowMsgs = fetchWindow.all(
-        p.chat_id,
-        p.timestamp,
-        windowSize + 1,
-        p.chat_id,
-        p.timestamp,
-        windowSize + 1
+    for (const c of i) {
+      const l = d.all(
+        c.chat_id,
+        c.timestamp,
+        t + 1,
+        c.chat_id,
+        c.timestamp,
+        t + 1
       );
-      windows.push(windowMsgs);
+      o.push(l);
     }
-    return windows;
+    return o;
   }
 }
-class SessionRepository {
-  constructor(db) {
-    this.db = db;
+class G {
+  constructor(e) {
+    this.db = e;
   }
   /**
    * Insert sessions and their FTS5 entries in a single transaction.
    */
-  insertBatch(sessions, entities) {
-    if (sessions.length === 0 && entities.length === 0) return;
-    const insertSession = this.db.prepare(`
+  insertBatch(e, t) {
+    if (e.length === 0 && t.length === 0) return;
+    const s = this.db.prepare(`
       INSERT INTO sessions (
         id, chat_id, start_time, end_time, message_count, summary
       ) VALUES (
         @id, @chat_id, @start_time, @end_time, @message_count, @summary
       )
-    `);
-    const insertSessionFts = this.db.prepare(`
+    `), a = this.db.prepare(`
       INSERT INTO sessions_fts (summary, session_id)
       VALUES (@summary, @session_id)
-    `);
-    const insertEntity = this.db.prepare(`
+    `), r = this.db.prepare(`
       INSERT INTO entities (
         id, session_id, name, normalized_name, type, action
       ) VALUES (
         @id, @session_id, @name, @normalized_name, @type, @action
       )
-    `);
-    const insertEntityFts = this.db.prepare(`
+    `), i = this.db.prepare(`
       INSERT INTO entities_fts (normalized_name, type, action, entity_id)
       VALUES (@normalized_name, @type, @action, @entity_id)
     `);
-    const runAll = this.db.transaction((sessItems, entItems) => {
-      for (const sess of sessItems) {
-        const id = sess.id ?? nanoid();
-        insertSession.run({
-          id,
-          chat_id: sess.chat_id,
-          start_time: sess.start_time,
-          end_time: sess.end_time,
-          message_count: sess.message_count ?? 0,
-          summary: sess.summary
-        });
-        insertSessionFts.run({ summary: sess.summary, session_id: id });
+    this.db.transaction((d, c) => {
+      for (const l of d) {
+        const m = l.id ?? _();
+        s.run({
+          id: m,
+          chat_id: l.chat_id,
+          start_time: l.start_time,
+          end_time: l.end_time,
+          message_count: l.message_count ?? 0,
+          summary: l.summary
+        }), a.run({ summary: l.summary, session_id: m });
       }
-      for (const ent of entItems) {
-        const id = ent.id ?? nanoid();
-        insertEntity.run({
-          id,
-          session_id: ent.session_id,
-          name: ent.name,
-          normalized_name: ent.normalized_name,
-          type: ent.type,
-          action: ent.action
-        });
-        insertEntityFts.run({
-          normalized_name: ent.normalized_name,
-          type: ent.type,
-          action: ent.action,
-          entity_id: id
+      for (const l of c) {
+        const m = l.id ?? _();
+        r.run({
+          id: m,
+          session_id: l.session_id,
+          name: l.name,
+          normalized_name: l.normalized_name,
+          type: l.type,
+          action: l.action
+        }), i.run({
+          normalized_name: l.normalized_name,
+          type: l.type,
+          action: l.action,
+          entity_id: m
         });
       }
-    });
-    runAll(sessions, entities);
+    })(e, t);
   }
   /**
    * Update a session with its NLP summary and insert its entities + FTS5 entries.
    * Used by the background NLP worker.
    */
-  updateSessionNLP(sessionId, summary, entities) {
-    const updateSession = this.db.prepare(`
+  updateSessionNLP(e, t, s) {
+    const a = this.db.prepare(`
       UPDATE sessions SET summary = @summary WHERE id = @id
-    `);
-    const updateSessionFts = this.db.prepare(`
+    `), r = this.db.prepare(`
       UPDATE sessions_fts SET summary = @summary WHERE session_id = @id
-    `);
-    const insertEntity = this.db.prepare(`
+    `), i = this.db.prepare(`
       INSERT INTO entities (
         id, session_id, name, normalized_name, type, action
       ) VALUES (
         @id, @session_id, @name, @normalized_name, @type, @action
       )
-    `);
-    const insertEntityFts = this.db.prepare(`
+    `), o = this.db.prepare(`
       INSERT INTO entities_fts (normalized_name, type, action, entity_id)
       VALUES (@normalized_name, @type, @action, @entity_id)
     `);
-    const runAll = this.db.transaction(() => {
-      updateSession.run({ summary, id: sessionId });
-      updateSessionFts.run({ summary, id: sessionId });
-      for (const ent of entities) {
-        const id = ent.id ?? nanoid();
-        insertEntity.run({
-          id,
-          session_id: ent.session_id,
-          name: ent.name,
-          normalized_name: ent.normalized_name,
-          type: ent.type,
-          action: ent.action
-        });
-        insertEntityFts.run({
-          normalized_name: ent.normalized_name,
-          type: ent.type,
-          action: ent.action,
-          entity_id: id
+    this.db.transaction(() => {
+      a.run({ summary: t, id: e }), r.run({ summary: t, id: e });
+      for (const c of s) {
+        const l = c.id ?? _();
+        i.run({
+          id: l,
+          session_id: c.session_id,
+          name: c.name,
+          normalized_name: c.normalized_name,
+          type: c.type,
+          action: c.action
+        }), o.run({
+          normalized_name: c.normalized_name,
+          type: c.type,
+          action: c.action,
+          entity_id: l
         });
       }
-    });
-    runAll();
+    })();
   }
-  findByChatId(chatId) {
-    const rows = this.db.prepare(`
+  findByChatId(e) {
+    return this.db.prepare(`
       SELECT * FROM sessions
       WHERE chat_id = ?
       ORDER BY start_time ASC
-    `).all(chatId);
-    return rows;
+    `).all(e);
   }
-  findEntitiesByChatId(chatId) {
-    const rows = this.db.prepare(`
+  findEntitiesByChatId(e) {
+    return this.db.prepare(`
       SELECT e.* FROM entities e
       JOIN sessions s ON s.id = e.session_id
       WHERE s.chat_id = ?
       ORDER BY e.created_at ASC
-    `).all(chatId);
-    return rows;
+    `).all(e);
   }
-  findById(id) {
-    const row = this.db.prepare(
+  findById(e) {
+    return this.db.prepare(
       "SELECT * FROM sessions WHERE id = ?"
-    ).get(id);
-    return row || null;
+    ).get(e) || null;
   }
-  deleteByChatId(chatId) {
-    const sessionIds = this.db.prepare(
+  deleteByChatId(e) {
+    const t = this.db.prepare(
       "SELECT id FROM sessions WHERE chat_id = ?"
-    ).all(chatId);
-    if (sessionIds.length === 0) {
+    ).all(e);
+    if (t.length === 0)
       return;
-    }
-    const deleteSessions = this.db.prepare("DELETE FROM sessions WHERE chat_id = ?");
-    const deleteSessionFts = this.db.prepare("DELETE FROM sessions_fts WHERE session_id = ?");
-    const deleteEntityFts = this.db.prepare(
+    const s = this.db.prepare("DELETE FROM sessions WHERE chat_id = ?"), a = this.db.prepare("DELETE FROM sessions_fts WHERE session_id = ?"), r = this.db.prepare(
       "DELETE FROM entities_fts WHERE entity_id IN (SELECT id FROM entities WHERE session_id = ?)"
     );
-    const runAll = this.db.transaction(() => {
-      for (const { id } of sessionIds) {
-        deleteEntityFts.run(id);
-        deleteSessionFts.run(id);
-      }
-      deleteSessions.run(chatId);
-    });
-    runAll();
+    this.db.transaction(() => {
+      for (const { id: o } of t)
+        r.run(o), a.run(o);
+      s.run(e);
+    })();
   }
-  countByChatId(chatId) {
-    const row = this.db.prepare(
+  countByChatId(e) {
+    return this.db.prepare(
       "SELECT COUNT(*) as count FROM sessions WHERE chat_id = ?"
-    ).get(chatId);
-    return row.count;
+    ).get(e).count;
   }
-  searchNarrative(keywords, limit = 5, options) {
-    if (!keywords || keywords.length === 0) return [];
-    if (keywords.includes("#RECENT#")) {
-      let q = `SELECT * FROM sessions`;
-      const p = [];
-      const clauses = [];
-      if (options == null ? void 0 : options.dateFrom) {
-        clauses.push(`start_time >= ?`);
-        p.push(options.dateFrom);
-      }
-      if (options == null ? void 0 : options.dateTo) {
-        clauses.push(`end_time <= ?`);
-        p.push(options.dateTo);
-      }
-      if (clauses.length > 0) {
-        q += ` WHERE ` + clauses.join(" AND ");
-      }
-      q += ` ORDER BY start_time DESC LIMIT ?`;
-      p.push(limit);
-      const rows = this.db.prepare(q).all(...p);
-      return rows.reverse();
+  searchNarrative(e, t = 5, s) {
+    if (!e || e.length === 0) return [];
+    if (e.includes("#RECENT#")) {
+      let d = "SELECT * FROM sessions";
+      const c = [], l = [];
+      return s != null && s.dateFrom && (l.push("start_time >= ?"), c.push(s.dateFrom)), s != null && s.dateTo && (l.push("end_time <= ?"), c.push(s.dateTo)), l.length > 0 && (d += " WHERE " + l.join(" AND ")), d += " ORDER BY start_time DESC LIMIT ?", c.push(t), this.db.prepare(d).all(...c).reverse();
     }
-    const cleanTokens = keywords.map((k) => k.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ]/g, "").trim()).filter(Boolean);
-    if (cleanTokens.length === 0) return [];
-    const matchQuery = cleanTokens.map((k) => `"${k}"*`).join(" OR ");
-    let query = `
+    const a = e.map((d) => d.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ]/g, "").trim()).filter(Boolean);
+    if (a.length === 0) return [];
+    const r = a.map((d) => `"${d}"*`).join(" OR ");
+    let i = `
       SELECT s.*
       FROM sessions_fts fts
       JOIN sessions s ON fts.session_id = s.id
       WHERE sessions_fts MATCH ?
     `;
-    const params = [matchQuery];
-    if (options == null ? void 0 : options.dateFrom) {
-      query += ` AND s.start_time >= ?`;
-      params.push(options.dateFrom);
-    }
-    if (options == null ? void 0 : options.dateTo) {
-      query += ` AND s.end_time <= ?`;
-      params.push(options.dateTo);
-    }
-    query += ` ORDER BY fts.rank LIMIT ?`;
-    params.push(limit);
-    return this.db.prepare(query).all(...params);
+    const o = [r];
+    return s != null && s.dateFrom && (i += " AND s.start_time >= ?", o.push(s.dateFrom)), s != null && s.dateTo && (i += " AND s.end_time <= ?", o.push(s.dateTo)), i += " ORDER BY fts.rank LIMIT ?", o.push(t), this.db.prepare(i).all(...o);
   }
-  searchAggregation(keywords, limit = 10, options) {
-    if (!keywords || keywords.length === 0) return [];
-    const cleanTokens = keywords.map((k) => k.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, "").trim()).filter(Boolean);
-    if (cleanTokens.length === 0) return [];
-    const matchQuery = cleanTokens.map((k) => `"${k}"*`).join(" OR ");
-    let query = `
+  searchAggregation(e, t = 10, s) {
+    if (!e || e.length === 0) return [];
+    const a = e.map((d) => d.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, "").trim()).filter(Boolean);
+    if (a.length === 0) return [];
+    const r = a.map((d) => `"${d}"*`).join(" OR ");
+    let i = `
       SELECT e.normalized_name as name, e.type, COUNT(*) as count
       FROM entities_fts fts
       JOIN entities e ON fts.entity_id = e.id
       JOIN sessions s ON e.session_id = s.id
       WHERE entities_fts MATCH ?
     `;
-    const params = [matchQuery];
-    if (options == null ? void 0 : options.dateFrom) {
-      query += ` AND s.start_time >= ?`;
-      params.push(options.dateFrom);
-    }
-    if (options == null ? void 0 : options.dateTo) {
-      query += ` AND s.end_time <= ?`;
-      params.push(options.dateTo);
-    }
-    query += ` GROUP BY e.normalized_name, e.type ORDER BY count DESC LIMIT ?`;
-    params.push(limit);
-    return this.db.prepare(query).all(...params);
+    const o = [r];
+    return s != null && s.dateFrom && (i += " AND s.start_time >= ?", o.push(s.dateFrom)), s != null && s.dateTo && (i += " AND s.end_time <= ?", o.push(s.dateTo)), i += " GROUP BY e.normalized_name, e.type ORDER BY count DESC LIMIT ?", o.push(t), this.db.prepare(i).all(...o);
   }
 }
-function registerChatHandlers() {
-  ipcMain.handle("chats:list", async () => {
-    const db = DatabaseService.getInstance();
-    const repo = new ChatRepository(db);
-    return repo.findAll();
-  });
-  ipcMain.handle("chats:delete", async (_event, chatId) => {
-    const db = DatabaseService.getInstance();
-    const deleteOp = db.transaction(() => {
-      const msgRepo = new MessageRepository(db);
-      const sessionRepo = new SessionRepository(db);
-      const chatRepo = new ChatRepository(db);
-      sessionRepo.deleteByChatId(chatId);
-      msgRepo.deleteByChatId(chatId);
-      chatRepo.delete(chatId);
-    });
-    deleteOp();
+function at() {
+  f.handle("chats:list", async () => {
+    const n = R.getInstance();
+    return new b(n).findAll();
+  }), f.handle("chats:delete", async (n, e) => {
+    const t = R.getInstance();
+    t.transaction(() => {
+      const a = new J(t), r = new G(t), i = new b(t);
+      r.deleteByChatId(e), a.deleteByChatId(e), i.delete(e);
+    })();
   });
 }
-const ANDROID_BR = {
+const it = {
   id: "android_br",
   regex: /^(\d{2}\/\d{2}\/\d{4}) (\d{2}:\d{2}) - ([^:]+): (.*)$/,
   format: {
@@ -1077,12 +896,11 @@ const ANDROID_BR = {
     locale: "pt-BR",
     dateFormat: "DD/MM/YYYY",
     timeFormat: "24h",
-    hasSeconds: false,
-    hasBrackets: false
+    hasSeconds: !1,
+    hasBrackets: !1
   },
   groups: { date: 1, time: 2, sender: 3, content: 4 }
-};
-const ANDROID_BR_COMMA = {
+}, rt = {
   id: "android_br_comma",
   regex: /^(\d{2}\/\d{2}\/\d{4}), (\d{2}:\d{2}) - ([^:]+): (.*)$/,
   format: {
@@ -1091,12 +909,11 @@ const ANDROID_BR_COMMA = {
     locale: "pt-PT",
     dateFormat: "DD/MM/YYYY",
     timeFormat: "24h",
-    hasSeconds: false,
-    hasBrackets: false
+    hasSeconds: !1,
+    hasBrackets: !1
   },
   groups: { date: 1, time: 2, sender: 3, content: 4 }
-};
-const ANDROID_EN = {
+}, ot = {
   id: "android_en",
   regex: /^(\d{1,2}\/\d{1,2}\/\d{2,4}), (\d{1,2}:\d{2} [AP]M) - ([^:]+): (.*)$/,
   format: {
@@ -1105,12 +922,11 @@ const ANDROID_EN = {
     locale: "en-US",
     dateFormat: "M/D/YY",
     timeFormat: "12h",
-    hasSeconds: false,
-    hasBrackets: false
+    hasSeconds: !1,
+    hasBrackets: !1
   },
   groups: { date: 1, time: 2, sender: 3, content: 4 }
-};
-const IOS_EN = {
+}, ct = {
   id: "ios_en",
   regex: /^\[(\d{1,2}\/\d{1,2}\/\d{2,4}), (\d{1,2}:\d{2}:\d{2} [AP]M)\] ([^:]+): (.*)$/,
   format: {
@@ -1119,18 +935,16 @@ const IOS_EN = {
     locale: "en-US",
     dateFormat: "M/D/YY",
     timeFormat: "12h",
-    hasSeconds: true,
-    hasBrackets: true
+    hasSeconds: !0,
+    hasBrackets: !0
   },
   groups: { date: 1, time: 2, sender: 3, content: 4 }
-};
-const ALL_PATTERNS = [
-  ANDROID_BR,
-  ANDROID_BR_COMMA,
-  ANDROID_EN,
-  IOS_EN
-];
-const SYSTEM_PATTERNS = [
+}, H = [
+  it,
+  rt,
+  ot,
+  ct
+], dt = [
   /criptografia de ponta/i,
   /end-to-end encrypted/i,
   /adicionou/i,
@@ -1151,8 +965,7 @@ const SYSTEM_PATTERNS = [
   /removed\s+\+?\d/i,
   /security code changed/i,
   /código de segurança mudou/i
-];
-const MEDIA_PATTERNS = [
+], lt = [
   /<Mídia oculta>/i,
   /<Media omitted>/i,
   /\.(jpg|jpeg|png|gif|webp|mp4|opus|ogg|pdf|docx?)\s*\(arquivo anexado\)/i,
@@ -1164,223 +977,178 @@ const MEDIA_PATTERNS = [
   /sticker omitted/i,
   /document omitted/i,
   /GIF omitted/i
-];
-const SAMPLE_LINE_COUNT = 20;
-async function detectFormatFromFile(filePath) {
-  const sampleLines = await readSampleLines(filePath, SAMPLE_LINE_COUNT);
-  return detectFormatFromLines(sampleLines);
+], mt = 20;
+async function Et(n) {
+  const e = await Tt(n, mt);
+  return ut(e);
 }
-function detectFormatFromLines(lines) {
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    for (const pattern of ALL_PATTERNS) {
-      if (pattern.regex.test(trimmed)) {
-        return pattern.format;
-      }
+function ut(n) {
+  for (const e of n) {
+    const t = e.trim();
+    if (t) {
+      for (const s of H)
+        if (s.regex.test(t))
+          return s.format;
     }
   }
   throw new Error(
-    `WhatsApp format not recognized. Tried ${ALL_PATTERNS.length} patterns on ${lines.length} sample lines.`
+    `WhatsApp format not recognized. Tried ${H.length} patterns on ${n.length} sample lines.`
   );
 }
-function getPatternById(formatId) {
-  const pattern = ALL_PATTERNS.find((p) => p.id === formatId);
-  if (!pattern) {
-    throw new Error(`No pattern registered for format ID: ${formatId}`);
-  }
-  return pattern;
+function pt(n) {
+  const e = H.find((t) => t.id === n);
+  if (!e)
+    throw new Error(`No pattern registered for format ID: ${n}`);
+  return e;
 }
-async function readSampleLines(filePath, count) {
-  const lines = [];
-  const rl = createInterface({
-    input: createReadStream(filePath, { encoding: "utf-8" }),
-    crlfDelay: Infinity
+async function Tt(n, e) {
+  const t = [], s = pe({
+    input: K(n, { encoding: "utf-8" }),
+    crlfDelay: 1 / 0
   });
-  for await (const line of rl) {
-    lines.push(line);
-    if (lines.length >= count) {
-      rl.close();
+  for await (const a of s)
+    if (t.push(a), t.length >= e) {
+      s.close();
       break;
     }
-  }
-  return lines;
+  return t;
 }
-class WhatsAppParser {
+class ht {
   /**
    * Parse a WhatsApp export .txt file using streaming (memory-efficient).
    */
-  async parse(filePath) {
-    let format;
+  async parse(e) {
+    let t;
     try {
-      format = await detectFormatFromFile(filePath);
-    } catch (err) {
+      t = await Et(e);
+    } catch (m) {
       throw new Error(
-        `Failed to detect WhatsApp format: ${err instanceof Error ? err.message : String(err)}`
+        `Failed to detect WhatsApp format: ${m instanceof Error ? m.message : String(m)}`
       );
     }
-    const pattern = getPatternById(format.id);
-    const messages = [];
-    const errors = [];
-    let currentMessage = null;
-    let lineNumber = 0;
-    const rl = createInterface({
-      input: createReadStream(filePath, { encoding: "utf-8" }),
-      crlfDelay: Infinity
+    const s = pt(t.id), a = [], r = [];
+    let i = null, o = 0;
+    const d = pe({
+      input: K(e, { encoding: "utf-8" }),
+      crlfDelay: 1 / 0
     });
-    for await (const line of rl) {
-      lineNumber++;
-      const cleanLine = lineNumber === 1 ? line.replace(/^\uFEFF/, "") : line;
-      const match = pattern.regex.exec(cleanLine);
-      if (match) {
-        if (currentMessage && isComplete(currentMessage)) {
-          messages.push(finalizeMessage(currentMessage));
-        }
-        const rawDate = match[pattern.groups.date];
-        const rawTime = match[pattern.groups.time];
-        let timestamp;
+    for await (const m of d) {
+      o++;
+      const p = o === 1 ? m.replace(/^\uFEFF/, "") : m, g = s.regex.exec(p);
+      if (g) {
+        i && de(i) && a.push(le(i));
+        const I = g[s.groups.date], T = g[s.groups.time];
+        let y;
         try {
-          timestamp = parseTimestamp(rawDate, rawTime, format);
+          y = gt(I, T, t);
         } catch {
-          errors.push({ line: lineNumber, content: cleanLine, reason: "invalid_timestamp" });
-          currentMessage = null;
+          r.push({ line: o, content: p, reason: "invalid_timestamp" }), i = null;
           continue;
         }
-        const rawContent = match[pattern.groups.content] ?? "";
-        const sender = match[pattern.groups.sender].trim();
-        currentMessage = {
-          timestamp,
-          sender,
-          content: rawContent,
-          type: detectMessageType(rawContent, sender),
-          raw: cleanLine,
-          lineNumber
+        const L = g[s.groups.content] ?? "", A = g[s.groups.sender].trim();
+        i = {
+          timestamp: y,
+          sender: A,
+          content: L,
+          type: Te(L, A),
+          raw: p,
+          lineNumber: o
         };
-      } else if (currentMessage && cleanLine.trim()) {
-        currentMessage.content = (currentMessage.content ?? "") + "\n" + cleanLine;
-        currentMessage.raw = (currentMessage.raw ?? "") + "\n" + cleanLine;
-      } else if (cleanLine.trim() && !currentMessage) {
-        errors.push({ line: lineNumber, content: cleanLine, reason: "orphan_line" });
-      }
+      } else i && p.trim() ? (i.content = (i.content ?? "") + `
+` + p, i.raw = (i.raw ?? "") + `
+` + p) : p.trim() && !i && r.push({ line: o, content: p, reason: "orphan_line" });
     }
-    if (currentMessage && isComplete(currentMessage)) {
-      messages.push(finalizeMessage(currentMessage));
-    }
-    const participants = [...new Set(messages.map((m) => m.sender))];
-    const stats = {
-      totalLines: lineNumber,
-      totalMessages: messages.length,
-      errorCount: errors.length,
-      participants,
-      firstTimestamp: messages.length > 0 ? messages[0].timestamp : null,
-      lastTimestamp: messages.length > 0 ? messages[messages.length - 1].timestamp : null
+    i && de(i) && a.push(le(i));
+    const c = [...new Set(a.map((m) => m.sender))], l = {
+      totalLines: o,
+      totalMessages: a.length,
+      errorCount: r.length,
+      participants: c,
+      firstTimestamp: a.length > 0 ? a[0].timestamp : null,
+      lastTimestamp: a.length > 0 ? a[a.length - 1].timestamp : null
     };
-    return { messages, format, errors, stats };
+    return { messages: a, format: t, errors: r, stats: l };
   }
 }
-function isComplete(m) {
-  return m.timestamp !== void 0 && m.sender !== void 0 && m.content !== void 0 && m.type !== void 0 && m.raw !== void 0 && m.lineNumber !== void 0;
+function de(n) {
+  return n.timestamp !== void 0 && n.sender !== void 0 && n.content !== void 0 && n.type !== void 0 && n.raw !== void 0 && n.lineNumber !== void 0;
 }
-function finalizeMessage(m) {
+function le(n) {
   return {
-    timestamp: m.timestamp,
-    sender: m.sender,
-    content: m.content.trim(),
-    type: detectMessageType(m.content.trim(), m.sender),
-    raw: m.raw,
-    lineNumber: m.lineNumber
+    timestamp: n.timestamp,
+    sender: n.sender,
+    content: n.content.trim(),
+    type: Te(n.content.trim(), n.sender),
+    raw: n.raw,
+    lineNumber: n.lineNumber
   };
 }
-function detectMessageType(content, sender) {
-  const trimmed = content.trim();
-  for (const pattern of MEDIA_PATTERNS) {
-    if (pattern.test(trimmed)) return "media";
-  }
-  for (const pattern of SYSTEM_PATTERNS) {
-    if (pattern.test(trimmed)) return "system";
-  }
-  if (!sender || sender.trim() === "") return "system";
-  return "text";
+function Te(n, e) {
+  const t = n.trim();
+  for (const s of lt)
+    if (s.test(t)) return "media";
+  for (const s of dt)
+    if (s.test(t)) return "system";
+  return !e || e.trim() === "" ? "system" : "text";
 }
-function parseTimestamp(date, time, format) {
-  let day, month, year;
-  if (format.locale === "pt-BR" || format.locale === "pt-PT") {
-    const [d, m, y] = date.split("/").map(Number);
-    day = d;
-    month = m;
-    year = y;
-  } else if (format.locale === "en-US") {
-    const [m, d, y] = date.split("/").map(Number);
-    month = m;
-    day = d;
-    year = y;
+function gt(n, e, t) {
+  let s, a, r;
+  if (t.locale === "pt-BR" || t.locale === "pt-PT") {
+    const [c, l, m] = n.split("/").map(Number);
+    s = c, a = l, r = m;
+  } else if (t.locale === "en-US") {
+    const [c, l, m] = n.split("/").map(Number);
+    a = c, s = l, r = m;
+  } else
+    [s, a, r] = n.split(/[\/\.\-]/).map(Number);
+  r < 100 && (r += r < 70 ? 2e3 : 1900);
+  let i, o;
+  if (t.timeFormat === "12h") {
+    const c = /PM/i.test(e), m = e.replace(/\s*[AP]M/i, "").split(":").map(Number);
+    i = m[0], o = m[1], c && i !== 12 && (i += 12), !c && i === 12 && (i = 0);
   } else {
-    const parts = date.split(/[\/\.\-]/).map(Number);
-    [day, month, year] = parts;
+    const c = e.split(":").map(Number);
+    i = c[0], o = c[1];
   }
-  if (year < 100) year += year < 70 ? 2e3 : 1900;
-  let hours, minutes;
-  if (format.timeFormat === "12h") {
-    const isPM = /PM/i.test(time);
-    const timePart = time.replace(/\s*[AP]M/i, "");
-    const parts = timePart.split(":").map(Number);
-    hours = parts[0];
-    minutes = parts[1];
-    if (isPM && hours !== 12) hours += 12;
-    if (!isPM && hours === 12) hours = 0;
-  } else {
-    const parts = time.split(":").map(Number);
-    hours = parts[0];
-    minutes = parts[1];
-  }
-  const ts = Date.UTC(year, month - 1, day, hours, minutes) / 1e3;
-  if (isNaN(ts)) throw new Error(`Invalid timestamp: ${date} ${time}`);
-  return ts;
+  const d = Date.UTC(r, a - 1, s, i, o) / 1e3;
+  if (isNaN(d)) throw new Error(`Invalid timestamp: ${n} ${e}`);
+  return d;
 }
-class SessionEngine {
-  constructor(maxGapSeconds = 7200) {
-    __publicField(this, "maxGapSeconds");
-    this.maxGapSeconds = maxGapSeconds;
+class _t {
+  constructor(e = 7200, t = 400) {
+    E(this, "maxGapSeconds");
+    E(this, "maxTokens");
+    this.maxGapSeconds = e, this.maxTokens = t;
   }
   /**
    * Groups an array of parsed messages into temporal sessions.
-   * A new session starts when the gap between two messages exceeds `maxGapSeconds`.
+   * A new session starts when the gap between two messages exceeds `maxGapSeconds`,
+   * or when the estimated token count exceeds `maxTokens` (adaptive chunking).
    * Messages are assumed to be pre-sorted by timestamp ascending.
    */
-  group(messages) {
-    if (messages.length === 0) return [];
-    const sorted = [...messages].sort((a, b) => a.timestamp - b.timestamp);
-    const sessions = [];
-    let currentSessionMessages = [sorted[0]];
-    let currentStartTime = sorted[0].timestamp;
-    let lastMsgTime = sorted[0].timestamp;
-    for (let i = 1; i < sorted.length; i++) {
-      const msg = sorted[i];
-      const gap = msg.timestamp - lastMsgTime;
-      if (gap > this.maxGapSeconds) {
-        sessions.push({
-          messages: currentSessionMessages,
-          start_time: currentStartTime,
-          end_time: lastMsgTime,
-          message_count: currentSessionMessages.length
-        });
-        currentSessionMessages = [msg];
-        currentStartTime = msg.timestamp;
-      } else {
-        currentSessionMessages.push(msg);
-      }
-      lastMsgTime = msg.timestamp;
+  group(e) {
+    var d, c;
+    if (e.length === 0) return [];
+    const t = [...e].sort((l, m) => l.timestamp - m.timestamp), s = [];
+    let a = [t[0]], r = t[0].timestamp, i = t[0].timestamp, o = Math.ceil((((d = t[0].content) == null ? void 0 : d.length) || 0) / 4);
+    for (let l = 1; l < t.length; l++) {
+      const m = t[l], p = m.timestamp - i, g = Math.ceil((((c = m.content) == null ? void 0 : c.length) || 0) / 4);
+      p > this.maxGapSeconds || o + g > this.maxTokens ? (s.push({
+        messages: a,
+        start_time: r,
+        end_time: i,
+        message_count: a.length
+      }), a = [m], r = m.timestamp, o = g) : (a.push(m), o += g), i = m.timestamp;
     }
-    sessions.push({
-      messages: currentSessionMessages,
-      start_time: currentStartTime,
-      end_time: lastMsgTime,
-      message_count: currentSessionMessages.length
-    });
-    return sessions;
+    return s.push({
+      messages: a,
+      start_time: r,
+      end_time: i,
+      message_count: a.length
+    }), s;
   }
 }
-const MODEL_REGISTRY = {
+const P = {
   /**
    * nomic-embed-text-v1.5
    */
@@ -1427,20 +1195,14 @@ const MODEL_REGISTRY = {
     purpose: "generation",
     quantization: "Q4_K_M"
   }
-};
-const MODEL_DOWNLOAD_ORDER = ["embedding", "worker", "brain"];
-const _ModelManager = class _ModelManager {
+}, ft = ["embedding", "worker", "brain"], D = class D {
   constructor() {
     /** Absolute path to the models directory in Electron's userData */
-    __publicField(this, "modelsDir");
-    this.modelsDir = path.join(app.getPath("userData"), "models");
-    fs.mkdirSync(this.modelsDir, { recursive: true });
+    E(this, "modelsDir");
+    this.modelsDir = N.join(O.getPath("userData"), "models"), ee.mkdirSync(this.modelsDir, { recursive: !0 });
   }
   static getInstance() {
-    if (!_ModelManager.instance) {
-      _ModelManager.instance = new _ModelManager();
-    }
-    return _ModelManager.instance;
+    return D.instance || (D.instance = new D()), D.instance;
   }
   /**
    * Checks whether a model file is present locally without triggering a download.
@@ -1448,17 +1210,17 @@ const _ModelManager = class _ModelManager {
    * resolveModelFile with `download: false` returns the expected local path
    * without checking the network. We then verify the file actually exists on disk.
    */
-  async isAvailable(key) {
+  async isAvailable(e) {
     try {
-      const modelPath = await resolveModelFile(MODEL_REGISTRY[key].uri, {
+      const t = await $(P[e].uri, {
         directory: this.modelsDir,
-        download: false,
+        download: !1,
         // never trigger a download in a presence check
-        cli: false
+        cli: !1
       });
-      return fs.existsSync(modelPath);
+      return ee.existsSync(t);
     } catch {
-      return false;
+      return !1;
     }
   }
   /**
@@ -1466,33 +1228,30 @@ const _ModelManager = class _ModelManager {
    * Runs availability checks in parallel for speed.
    */
   async checkAll() {
-    const statuses = await Promise.all(
-      MODEL_DOWNLOAD_ORDER.map(async (key) => {
-        const entry = MODEL_REGISTRY[key];
-        const available = await this.isAvailable(key);
-        let filePath;
-        if (available) {
+    return await Promise.all(
+      ft.map(async (t) => {
+        const s = P[t], a = await this.isAvailable(t);
+        let r;
+        if (a)
           try {
-            filePath = await resolveModelFile(entry.uri, {
+            r = await $(s.uri, {
               directory: this.modelsDir,
-              download: false,
-              cli: false
+              download: !1,
+              cli: !1
             });
           } catch {
           }
-        }
         return {
-          key,
-          name: entry.name,
-          quantization: entry.quantization,
-          sizeEstimate: entry.sizeEstimate,
-          purpose: entry.purpose,
-          available,
-          filePath
+          key: t,
+          name: s.name,
+          quantization: s.quantization,
+          sizeEstimate: s.sizeEstimate,
+          purpose: s.purpose,
+          available: a,
+          filePath: r
         };
       })
     );
-    return statuses;
   }
   /**
    * Downloads a model with real-time progress reporting via the supplied callback.
@@ -1507,31 +1266,29 @@ const _ModelManager = class _ModelManager {
    * @param onProgress - Optional callback called with progress on each chunk
    * @returns          - Absolute path to the downloaded model entrypoint file
    */
-  async download(key, onProgress) {
-    const entry = MODEL_REGISTRY[key];
-    console.log(`[ModelManager] Starting download: ${entry.name} (${entry.uri})`);
-    const downloader = await createModelDownloader({
-      modelUri: entry.uri,
+  async download(e, t) {
+    const s = P[e];
+    console.log(`[ModelManager] Starting download: ${s.name} (${s.uri})`);
+    const r = await (await Oe({
+      modelUri: s.uri,
       dirPath: this.modelsDir,
-      showCliProgress: false,
-      onProgress: ({ totalSize, downloadedSize }) => {
-        if (onProgress) {
-          const total = totalSize ?? entry.sizeEstimate;
-          onProgress({
-            key,
-            name: entry.name,
-            downloadedBytes: downloadedSize,
-            totalBytes: total,
-            percent: total > 0 ? Math.round(downloadedSize / total * 100) : 0,
+      showCliProgress: !1,
+      onProgress: ({ totalSize: i, downloadedSize: o }) => {
+        if (t) {
+          const d = i ?? s.sizeEstimate;
+          t({
+            key: e,
+            name: s.name,
+            downloadedBytes: o,
+            totalBytes: d,
+            percent: d > 0 ? Math.round(o / d * 100) : 0,
             speed: 0
             // ipull doesn't expose instantaneous speed in onProgress
           });
         }
       }
-    });
-    const modelPath = await downloader.download();
-    console.log(`[ModelManager] Download complete: ${entry.name} → ${modelPath}`);
-    return modelPath;
+    })).download();
+    return console.log(`[ModelManager] Download complete: ${s.name} → ${r}`), r;
   }
   /**
    * Resolves the absolute file path for a model.
@@ -1542,98 +1299,79 @@ const _ModelManager = class _ModelManager {
    * Intended for use inside services (EmbeddingService, LLMService) to get
    * the model path lazily at initialization time.
    */
-  async resolve(key) {
-    const entry = MODEL_REGISTRY[key];
-    return resolveModelFile(entry.uri, {
+  async resolve(e) {
+    const t = P[e];
+    return $(t.uri, {
       directory: this.modelsDir,
       download: "auto",
-      cli: false
+      cli: !1
     });
   }
 };
-__publicField(_ModelManager, "instance", null);
-let ModelManager = _ModelManager;
-const _dirname$1 = typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
-const _WorkerProcess = class _WorkerProcess {
+E(D, "instance", null);
+let v = D;
+const Nt = typeof __dirname < "u" ? __dirname : N.dirname(Q(import.meta.url)), k = class k {
   constructor() {
-    __publicField(this, "worker", null);
-    __publicField(this, "pendingRequests", /* @__PURE__ */ new Map());
-    __publicField(this, "initializationPromise", null);
-    __publicField(this, "ready", false);
+    E(this, "worker", null);
+    E(this, "pendingRequests", /* @__PURE__ */ new Map());
+    E(this, "initializationPromise", null);
+    E(this, "ready", !1);
     // Basic Batch Queue (Will be expanded in 3.4)
-    __publicField(this, "batchQueue", []);
-    __publicField(this, "processingQueue", false);
-    __publicField(this, "currentModelKey", "worker");
+    E(this, "batchQueue", []);
+    E(this, "processingQueue", !1);
+    E(this, "currentModelKey", "worker");
   }
   static getInstance() {
-    if (!_WorkerProcess.instance) {
-      _WorkerProcess.instance = new _WorkerProcess();
-    }
-    return _WorkerProcess.instance;
+    return k.instance || (k.instance = new k()), k.instance;
   }
   async initialize() {
-    if (this.ready) return;
-    if (this.initializationPromise) return this.initializationPromise;
-    this.initializationPromise = new Promise(async (resolve, reject) => {
-      try {
-        await this.startWorker("worker");
-        this.ready = true;
-        resolve();
-      } catch (err) {
-        console.warn(`[WorkerProcess] Primary worker failed. Triggering fallback... Error:`, err);
+    if (!this.ready) {
+      if (this.initializationPromise) return this.initializationPromise;
+      this.initializationPromise = new Promise(async (e, t) => {
         try {
-          await this.startWorker("worker_fallback");
-          this.currentModelKey = "worker_fallback";
-          console.log("[WorkerProcess] Fallback to " + MODEL_REGISTRY.worker_fallback.name + " succeeded.");
-          this.ready = true;
-          resolve();
-        } catch (fbErr) {
-          console.error("[WorkerProcess] Fallback also failed:", fbErr);
-          this.initializationPromise = null;
-          reject(fbErr);
+          await this.startWorker("worker"), this.ready = !0, e();
+        } catch (s) {
+          console.warn("[WorkerProcess] Primary worker failed. Triggering fallback... Error:", s);
+          try {
+            await this.startWorker("worker_fallback"), this.currentModelKey = "worker_fallback", console.log("[WorkerProcess] Fallback to " + P.worker_fallback.name + " succeeded."), this.ready = !0, e();
+          } catch (a) {
+            console.error("[WorkerProcess] Fallback also failed:", a), this.initializationPromise = null, t(a);
+          }
         }
+      });
+      try {
+        await this.initializationPromise;
+      } finally {
+        this.initializationPromise = null;
       }
-    });
-    try {
-      await this.initializationPromise;
-    } finally {
-      this.initializationPromise = null;
     }
   }
-  startWorker(modelKey) {
-    return new Promise(async (resolve, reject) => {
-      console.log(`[WorkerProcess] Resolving model path for: ${modelKey}...`);
-      const modelPath = await ModelManager.getInstance().resolve(modelKey);
-      console.log(`[WorkerProcess] Forking Utility Process for ${modelKey}...`);
-      const workerPath = path.join(_dirname$1, "worker-worker.js");
-      this.worker = utilityProcess.fork(workerPath, [], {
+  startWorker(e) {
+    return new Promise(async (t, s) => {
+      console.log(`[WorkerProcess] Resolving model path for: ${e}...`);
+      const a = await v.getInstance().resolve(e);
+      console.log(`[WorkerProcess] Forking Utility Process for ${e}...`);
+      const r = N.join(Nt, "worker-worker.js");
+      this.worker = me.fork(r, [], {
         stdio: "inherit"
+      }), this.worker.on("message", (o) => this.handleWorkerMessage(o)), this.worker.on("exit", (o) => {
+        console.warn(`[WorkerProcess] Utility process exited with code ${o}`), this.ready = !1, this.worker = null, this.rejectAllPending(new Error(`Worker exited unexpectedly with code ${o}`));
       });
-      this.worker.on("message", (msg) => this.handleWorkerMessage(msg));
-      this.worker.on("exit", (code) => {
-        console.warn(`[WorkerProcess] Utility process exited with code ${code}`);
-        this.ready = false;
-        this.worker = null;
-        this.rejectAllPending(new Error(`Worker exited unexpectedly with code ${code}`));
-      });
-      const id = nanoid();
-      this.pendingRequests.set(id, {
+      const i = _();
+      this.pendingRequests.set(i, {
         resolve: async () => {
-          console.log(`[WorkerProcess] Initialized successfully. Running Day-0 test...`);
+          console.log("[WorkerProcess] Initialized successfully. Running Day-0 test...");
           try {
-            await this.internalGenerate("test", { maxTokens: 5 });
-            resolve();
-          } catch (e) {
-            this.dispose();
-            reject(e);
+            await this.internalGenerate("test", { maxTokens: 5 }), t();
+          } catch (o) {
+            this.dispose(), s(o);
           }
         },
-        reject
-      });
-      this.worker.postMessage({
+        reject: s
+      }), this.worker.postMessage({
         type: "init",
-        id,
-        payload: { modelPath }
+        id: i,
+        payload: { modelPath: a }
       });
     });
   }
@@ -1643,18 +1381,14 @@ const _WorkerProcess = class _WorkerProcess {
   getFallbackStatus() {
     return this.currentModelKey === "worker_fallback";
   }
-  async generate(prompt, options) {
-    return this.generateStream(prompt, () => {
-    }, options);
+  async generate(e, t) {
+    return this.generateStream(e, () => {
+    }, t);
   }
   // Queue wrapper
-  async generateStream(prompt, onToken, options) {
-    if (!this.ready || !this.worker) {
-      await this.initialize();
-    }
-    return new Promise((resolve, reject) => {
-      this.batchQueue.push({ prompt, options, resolve, reject, onToken });
-      this.processNextInQueue();
+  async generateStream(e, t, s) {
+    return (!this.ready || !this.worker) && await this.initialize(), new Promise((a, r) => {
+      this.batchQueue.push({ prompt: e, options: s, resolve: a, reject: r, onToken: t }), this.processNextInQueue();
     });
   }
   /**
@@ -1665,40 +1399,35 @@ const _WorkerProcess = class _WorkerProcess {
    * Generates text via LLM and enforces valid JSON extraction with an aggressive retry loop.
    * Useful since smaller parameter models like LFM2.5-350M can drift out of grammar.
    */
-  async generateJson(prompt, options, maxRetries = 3) {
-    let lastError = null;
-    let currentPrompt = prompt;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+  async generateJson(e, t, s = 3) {
+    let a = null, r = e;
+    for (let i = 1; i <= s; i++)
       try {
-        const rawResponse = await this.generate(currentPrompt, options);
-        return this.extractJson(rawResponse);
-      } catch (e) {
-        lastError = e;
-        console.warn(`[WorkerProcess] JSON extraction failed (attempt ${attempt}/${maxRetries}):`, e.message);
-        currentPrompt = prompt + `
+        const o = await this.generate(r, t);
+        return this.extractJson(o);
+      } catch (o) {
+        a = o, console.warn(`[WorkerProcess] JSON extraction failed (attempt ${i}/${s}):`, o.message), r = e + `
 
-[SYSTEM FEEDBACK: Your previous response failed JSON parsing with error: ${e.message}. Please return strictly valid JSON without conversational wrapper text.]`;
+[SYSTEM FEEDBACK: Your previous response failed JSON parsing with error: ${o.message}. Please return strictly valid JSON without conversational wrapper text.]`;
       }
-    }
-    throw new Error(`[WorkerProcess] Failed to generate valid JSON after ${maxRetries} attempts. Last error: ${lastError == null ? void 0 : lastError.message}`);
+    throw new Error(`[WorkerProcess] Failed to generate valid JSON after ${s} attempts. Last error: ${a == null ? void 0 : a.message}`);
   }
   /**
    * Helper to strip markdown (e.g. \`\`\`json) and aggressively find the { ... } boundaries.
    */
-  extractJson(text) {
+  extractJson(e) {
     try {
-      return JSON.parse(text);
-    } catch (_) {
+      return JSON.parse(e);
+    } catch {
     }
-    let cleaned = text.replace(/^```json/im, "").replace(/```$/im, "").trim();
-    const match = cleaned.match(/\{.*\}/s) || cleaned.match(/\[.*\]/s);
-    if (!match) {
+    let t = e.replace(/^```json/im, "").replace(/```$/im, "").trim();
+    const s = t.match(/\{.*\}/s) || t.match(/\[.*\]/s);
+    if (!s)
       throw new Error("No JSON boundaries ({...} or [...]) found in response");
-    }
-    return JSON.parse(match[0]);
+    return JSON.parse(s[0]);
   }
-  async classifyQuery(query) {
-    const prompt = `You are a strict JSON classification tool. You analyze Portuguese queries to search chat logs.
+  async classifyQuery(e) {
+    const t = `You are a strict JSON classification tool. You analyze Portuguese queries to search chat logs.
 Output ONLY raw JSON.
 
 Intent rules:
@@ -1724,25 +1453,16 @@ Query: "o que rolou na semana passada?"
 Query: "qual a senha do wifi"
 {"intent": "factual", "keywords": ["senha", "wifi"], "dateRange": {"start": null, "end": null}}
 
-Query: "${query}"
-`;
-    const options = {
+Query: "${e}"
+`, s = {
       temperature: 0.05,
       maxTokens: 150,
       systemPrompt: "You are a headless JSON API. Respond only with valid JSON. Never output conversational text."
-    };
-    const res = await this.generateJson(prompt, options, 3);
-    const validIntents = ["factual", "aggregation", "narrative", "unknown"];
-    if (!validIntents.includes(res.intent)) {
-      res.intent = "factual";
-    }
-    if (!res.keywords || !Array.isArray(res.keywords)) {
-      res.keywords = [];
-    }
-    return res;
+    }, a = await this.generateJson(t, s, 3);
+    return ["factual", "aggregation", "narrative", "unknown"].includes(a.intent) || (a.intent = "factual"), (!a.keywords || !Array.isArray(a.keywords)) && (a.keywords = []), a;
   }
-  async expandKeywords(keywords) {
-    const prompt = `You are a linguistic expansion tool for Portuguese chat logs. Output ONLY raw JSON.
+  async expandKeywords(e) {
+    const t = `You are a linguistic expansion tool for Portuguese chat logs. Output ONLY raw JSON.
 Expand the keywords with exactly 3 common pt-BR synonyms, internet slang, or abbreviations. 
 Crucially: If a keyword is a Category/Class (like "jogos", "pessoas", "lugares", "topicos"), you MUST include its direct English translation (e.g. "game", "person", "place", "topic") so it matches our system's internal database classification schema.
 
@@ -1756,228 +1476,230 @@ Keywords: ["pessoas"]
 Keywords: ["risada", "engraçado"]
 {"expanded": ["kkk", "haha", "rsrs"]}
 
-Keywords: ${JSON.stringify(keywords)}
-`;
-    const options = {
+Keywords: ${JSON.stringify(e)}
+`, s = {
       temperature: 0.3,
       maxTokens: 100,
       systemPrompt: 'You are a headless JSON API. You MUST respond with exactly this JSON schema: {"expanded": ["str", "str"]}'
     };
     try {
-      const res = await this.generateJson(prompt, options, 2);
-      if (res.expanded && Array.isArray(res.expanded)) {
-        return Array.from(/* @__PURE__ */ new Set([...keywords, ...res.expanded]));
-      }
-    } catch (e) {
-      console.warn("[WorkerProcess] Failed to expand keywords", e);
+      const a = await this.generateJson(t, s, 2);
+      if (a.expanded && Array.isArray(a.expanded))
+        return Array.from(/* @__PURE__ */ new Set([...e, ...a.expanded]));
+    } catch (a) {
+      console.warn("[WorkerProcess] Failed to expand keywords", a);
     }
-    return keywords;
+    return e;
+  }
+  async extractSessionEntities(e) {
+    const t = `You are a strict JSON extraction tool. Analyze this chat session and extract third-party mentions.
+Output ONLY raw JSON. Do not output markdown, explanations, or conversational text.
+
+Rules:
+1. "summary": A 1-sentence summary of what happened in the session.
+2. "mentioned_entities": An array of entities (people, organizations) mentioned.
+   - Ignore generic nouns or brands unless they are the primary subject.
+   - "name": The extracted name.
+   - "type": "person" | "organization" | "other"
+   - "context": EXACT words or a very close paraphrase of what was said about them in the chat.
+   - "sentiment": "positive" | "negative" | "neutral"
+   - "is_participant": true if this person is one of the chat participants, false if it's a third-party mention.
+
+Schema:
+{
+  "summary": "str",
+  "mentioned_entities": [
+    { "name": "str", "type": "str", "context": "str", "sentiment": "str", "is_participant": boolean }
+  ]
+}
+
+Session Text:
+${e}
+`, s = {
+      temperature: 0.1,
+      maxTokens: 500,
+      systemPrompt: "You are a headless JSON API. You MUST respond with valid JSON matching the exact schema."
+    }, a = Date.now();
+    try {
+      const r = await this.generateJson(t, s, 3), i = Date.now() - a;
+      return console.log(`[WorkerProcess] extractSessionEntities completed in ${i}ms`), {
+        summary: r.summary || "Sessão extraída",
+        mentioned_entities: Array.isArray(r.mentioned_entities) ? r.mentioned_entities : []
+      };
+    } catch (r) {
+      const i = Date.now() - a;
+      return console.error(`[WorkerProcess] extractSessionEntities completely failed after ${i}ms:`, r.message), {
+        summary: "Sessão extraída via fallback de erro",
+        mentioned_entities: []
+      };
+    }
   }
   async processNextInQueue() {
     if (this.processingQueue || this.batchQueue.length === 0) return;
-    this.processingQueue = true;
-    const task = this.batchQueue.shift();
+    this.processingQueue = !0;
+    const e = this.batchQueue.shift();
     try {
-      const res = await this.internalGenerateStream(task.prompt, task.onToken || (() => {
-      }), task.options);
-      task.resolve(res);
-    } catch (e) {
-      task.reject(e);
+      const t = await this.internalGenerateStream(e.prompt, e.onToken || (() => {
+      }), e.options);
+      e.resolve(t);
+    } catch (t) {
+      e.reject(t);
     } finally {
-      this.processingQueue = false;
-      this.processNextInQueue();
+      this.processingQueue = !1, this.processNextInQueue();
     }
   }
-  async internalGenerate(prompt, options) {
-    return this.internalGenerateStream(prompt, () => {
-    }, options);
+  async internalGenerate(e, t) {
+    return this.internalGenerateStream(e, () => {
+    }, t);
   }
-  async internalGenerateStream(prompt, onToken, options) {
-    return new Promise((resolve, reject) => {
-      const id = nanoid();
-      this.pendingRequests.set(id, { resolve, reject, onToken });
-      this.worker.postMessage({
+  async internalGenerateStream(e, t, s) {
+    return new Promise((a, r) => {
+      const i = _();
+      this.pendingRequests.set(i, { resolve: a, reject: r, onToken: t }), this.worker.postMessage({
         type: "generate",
-        id,
-        payload: { prompt, options }
+        id: i,
+        payload: { prompt: e, options: s }
       });
     });
   }
   getModelInfo() {
     return {
-      modelName: MODEL_REGISTRY[this.currentModelKey].name,
+      modelName: P[this.currentModelKey].name,
       parameters: this.currentModelKey === "worker" ? "350M" : "270M"
     };
   }
   async dispose() {
-    if (!this.worker) return;
-    console.log("[WorkerProcess] Disposing worker...");
-    this.worker.postMessage({ type: "dispose" });
-    await new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        if (this.worker) this.worker.kill();
-        resolve();
+    this.worker && (console.log("[WorkerProcess] Disposing worker..."), this.worker.postMessage({ type: "dispose" }), await new Promise((e) => {
+      const t = setTimeout(() => {
+        this.worker && this.worker.kill(), e();
       }, 2e3);
       this.worker.once("exit", () => {
-        clearTimeout(timeout);
-        resolve();
+        clearTimeout(t), e();
       });
-    });
-    this.worker = null;
-    this.ready = false;
-    this.rejectAllPending(new Error("WorkerProcess is disposing or shutting down"));
-    this.initializationPromise = null;
+    }), this.worker = null, this.ready = !1, this.rejectAllPending(new Error("WorkerProcess is disposing or shutting down")), this.initializationPromise = null);
   }
-  handleWorkerMessage(msg) {
-    const { type, id, error, token, text } = msg;
-    if (!id || !this.pendingRequests.has(id)) {
-      if (type === "error") {
-        console.error(`[Worker Global Error]`, error);
-      }
+  handleWorkerMessage(e) {
+    const { type: t, id: s, error: a, token: r, text: i } = e;
+    if (!s || !this.pendingRequests.has(s)) {
+      t === "error" && console.error("[Worker Global Error]", a);
       return;
     }
-    const { resolve, reject, onToken } = this.pendingRequests.get(id);
-    switch (type) {
+    const { resolve: o, reject: d, onToken: c } = this.pendingRequests.get(s);
+    switch (t) {
       case "init-ready":
-        this.pendingRequests.delete(id);
-        resolve();
+        this.pendingRequests.delete(s), o();
         break;
       case "token":
-        if (onToken && token) onToken(token);
+        c && r && c(r);
         break;
       case "done":
-        this.pendingRequests.delete(id);
-        resolve(text);
+        this.pendingRequests.delete(s), o(i);
         break;
       case "error":
-        this.pendingRequests.delete(id);
-        reject(new Error(error));
+        this.pendingRequests.delete(s), d(new Error(a));
         break;
       default:
-        console.warn(`[WorkerProcess] Unrecognized message type '${type}'`);
+        console.warn(`[WorkerProcess] Unrecognized message type '${t}'`);
     }
   }
-  rejectAllPending(error) {
-    for (const [id, req] of this.pendingRequests.entries()) {
-      req.reject(error);
-      this.pendingRequests.delete(id);
-    }
+  rejectAllPending(e) {
+    for (const [t, s] of this.pendingRequests.entries())
+      s.reject(e), this.pendingRequests.delete(t);
   }
 };
-__publicField(_WorkerProcess, "instance", null);
-let WorkerProcess = _WorkerProcess;
-const WorkerProcess$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+E(k, "instance", null);
+let B = k;
+const he = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
-  WorkerProcess
+  WorkerProcess: B
 }, Symbol.toStringTag, { value: "Module" }));
-class ChatImportService {
+class St {
   constructor() {
-    __publicField(this, "parser", new WhatsAppParser());
-    __publicField(this, "sessionEngine", new SessionEngine(7200));
+    E(this, "parser", new ht());
+    E(this, "sessionEngine", new _t(7200));
   }
   // > 2h gap
-  async import(filePath, sender) {
-    const emit = (progress) => {
-      sender == null ? void 0 : sender.send("import:progress", progress);
+  async import(e, t) {
+    const s = (r) => {
+      t == null || t.send("import:progress", r);
     };
-    let chatId;
+    let a;
     try {
-      emit({ stage: "reading", percent: 5, label: "Lendo arquivo", detail: "Calculando hash..." });
-      const fileHash = await computeFileHash(filePath);
-      const db = DatabaseService.getInstance();
-      const chatRepo = new ChatRepository(db);
-      if (chatRepo.existsByHash(fileHash)) {
-        return { success: false, duplicate: true, error: "Arquivo já importado." };
-      }
-      const chatName = basename(filePath).replace(/\.[^/.]+$/, "");
-      chatId = nanoid();
-      emit({ stage: "parsing", percent: 15, label: "Parseando mensagens", detail: "Lendo chat base..." });
-      const parseResult = await this.parser.parse(filePath);
-      if (parseResult.messages.length === 0) {
-        return { success: false, error: "Nenhuma mensagem encontrada." };
-      }
-      const newMessages = parseResult.messages.map((m) => ({
-        id: nanoid(),
-        chat_id: chatId,
-        sender: m.sender,
-        content: m.content,
-        timestamp: m.timestamp,
-        type: m.type,
-        raw: m.raw
+      s({ stage: "reading", percent: 5, label: "Lendo arquivo", detail: "Calculando hash..." });
+      const r = await It(e), i = R.getInstance(), o = new b(i);
+      if (o.existsByHash(r))
+        return { success: !1, duplicate: !0, error: "Arquivo já importado." };
+      const d = Re(e).replace(/\.[^/.]+$/, "");
+      a = _(), s({ stage: "parsing", percent: 15, label: "Parseando mensagens", detail: "Lendo chat base..." });
+      const c = await this.parser.parse(e);
+      if (c.messages.length === 0)
+        return { success: !1, error: "Nenhuma mensagem encontrada." };
+      const l = c.messages.map((T) => ({
+        id: _(),
+        chat_id: a,
+        sender: T.sender,
+        content: T.content,
+        timestamp: T.timestamp,
+        type: T.type,
+        raw: T.raw
       }));
-      chatRepo.create({
-        id: chatId,
-        name: chatName,
+      o.create({
+        id: a,
+        name: d,
         source: "whatsapp",
-        file_hash: fileHash,
-        participant_count: parseResult.stats.participants.length,
-        message_count: parseResult.messages.length,
-        first_message_at: parseResult.stats.firstTimestamp ?? void 0,
-        last_message_at: parseResult.stats.lastTimestamp ?? void 0
-      });
-      emit({ stage: "fts_indexing", percent: 25, label: "Agrupando Sessões", detail: "Topologia Cronológica..." });
-      const rawSessions = this.sessionEngine.group(parseResult.messages);
-      const newSessions = [];
-      for (const rawSess of rawSessions) {
-        newSessions.push({
-          id: nanoid(),
-          chat_id: chatId,
-          start_time: rawSess.start_time,
-          end_time: rawSess.end_time,
-          message_count: rawSess.message_count,
+        file_hash: r,
+        participant_count: c.stats.participants.length,
+        message_count: c.messages.length,
+        first_message_at: c.stats.firstTimestamp ?? void 0,
+        last_message_at: c.stats.lastTimestamp ?? void 0
+      }), s({ stage: "fts_indexing", percent: 25, label: "Agrupando Sessões", detail: "Topologia Cronológica..." });
+      const m = this.sessionEngine.group(c.messages), p = [];
+      for (const T of m)
+        p.push({
+          id: _(),
+          chat_id: a,
+          start_time: T.start_time,
+          end_time: T.end_time,
+          message_count: T.message_count,
           summary: "Processando IA em background..."
           // Temporary summary
         });
-      }
-      emit({ stage: "fts_indexing", percent: 40, label: "Salvando no banco", detail: "Persistindo histórico nativo e Indexando FTS5..." });
-      const messageRepo = new MessageRepository(db);
-      messageRepo.insertBatch(newMessages);
-      const sessionRepo = new SessionRepository(db);
-      sessionRepo.insertBatch(newSessions, []);
-      this.runBackgroundNLP(chatId, rawSessions, newSessions, sender).catch((err) => {
-        console.error("[Background NLP Error]", err);
-      });
-      return {
-        success: true,
-        chatId,
-        chatName,
-        messageCount: parseResult.messages.length,
-        chunkCount: newSessions.length
+      return s({ stage: "fts_indexing", percent: 40, label: "Salvando no banco", detail: "Persistindo histórico nativo e Indexando FTS5..." }), new J(i).insertBatch(l), new G(i).insertBatch(p, []), this.runBackgroundNLP(a, m, p, t).catch((T) => {
+        console.error("[Background NLP Error]", T);
+      }), {
+        success: !0,
+        chatId: a,
+        chatName: d,
+        messageCount: c.messages.length,
+        chunkCount: p.length
         // total sessions
       };
-    } catch (err) {
-      if (chatId) {
+    } catch (r) {
+      if (a)
         try {
-          const db = DatabaseService.getInstance();
-          new ChatRepository(db).delete(chatId);
-        } catch (e) {
+          const o = R.getInstance();
+          new b(o).delete(a);
+        } catch {
         }
-      }
-      const message = err instanceof Error ? err.message : String(err);
-      console.error("[ChatImportService] Import failed:", message);
-      emit({ stage: "error", percent: 0, label: "Erro na importação", detail: message });
-      return { success: false, error: message };
+      const i = r instanceof Error ? r.message : String(r);
+      return console.error("[ChatImportService] Import failed:", i), s({ stage: "error", percent: 0, label: "Erro na importação", detail: i }), { success: !1, error: i };
     }
   }
   /**
    * Background process to extract summaries and entities via Worker
    */
-  async runBackgroundNLP(chatId, rawSessions, dbSessions, sender) {
-    const emit = (progress) => {
-      sender == null ? void 0 : sender.send("import:progress", progress);
+  async runBackgroundNLP(e, t, s, a) {
+    const r = (i) => {
+      a == null || a.send("import:progress", i);
     };
     try {
-      emit({ stage: "nlp_summaries", percent: 20, label: "Extração NLP Iniciada", detail: `Processando ${rawSessions.length} sessões...`, chatId });
-      const worker = WorkerProcess.getInstance();
-      await worker.initialize();
-      const db = DatabaseService.getInstance();
-      const sessionRepo = new SessionRepository(db);
-      let processed = 0;
-      for (let i = 0; i < rawSessions.length; i++) {
-        const rawSess = rawSessions[i];
-        const dbSess = dbSessions[i];
-        const convoContext = rawSess.messages.map((m) => `[${new Date(m.timestamp * 1e3).toISOString()}] ${m.sender}: ${m.content}`).join("\n");
-        const prompt = `Read the following chat session and extract the main summary and any notable entities mentioned (names, places, topics) along with their action/intent.
+      r({ stage: "nlp_summaries", percent: 20, label: "Extração NLP Iniciada", detail: `Processando ${t.length} sessões...`, chatId: e });
+      const i = B.getInstance();
+      await i.initialize();
+      const o = R.getInstance(), d = new G(o);
+      let c = 0;
+      for (let l = 0; l < t.length; l++) {
+        const m = t[l], p = s[l], I = `Read the following chat session and extract the main summary and any notable entities mentioned (names, places, topics) along with their action/intent.
 Respond ONLY with a valid JSON strictly matching this schema:
 {
   "summary": "general summary of what happened",
@@ -1987,66 +1709,52 @@ Respond ONLY with a valid JSON strictly matching this schema:
 }
 
 CHAT SESSION:
-${convoContext}`;
-        let summary = "Sessão concluída (sem detalhes extraídos)";
-        let extractedEntities = [];
+${m.messages.map((h) => `[${new Date(h.timestamp * 1e3).toISOString()}] ${h.sender}: ${h.content}`).join(`
+`)}`;
+        let T = "Sessão concluída (sem detalhes extraídos)", y = [];
         try {
-          const result = await worker.generateJson(prompt, { maxTokens: 800, temperature: 0.1 }, 3);
-          if (result.summary) summary = result.summary;
-          if (result.entities && Array.isArray(result.entities)) {
-            extractedEntities = result.entities;
-          }
-        } catch (e) {
-          console.warn("[ChatImportService Worker] Worker extraction failed on session:", e.message);
+          const h = await i.generateJson(I, { maxTokens: 800, temperature: 0.1 }, 3);
+          h.summary && (T = h.summary), h.entities && Array.isArray(h.entities) && (y = h.entities);
+        } catch (h) {
+          console.warn("[ChatImportService Worker] Worker extraction failed on session:", h.message);
         }
-        const newEntities = [];
-        for (const ent of extractedEntities) {
-          if (!ent.name) continue;
-          newEntities.push({
-            id: nanoid(),
-            session_id: dbSess.id,
-            name: ent.name,
-            normalized_name: ent.name.toLowerCase().trim(),
-            type: ent.type || "unknown",
-            action: ent.action || "mentioned"
+        const L = [];
+        for (const h of y)
+          h.name && L.push({
+            id: _(),
+            session_id: p.id,
+            name: h.name,
+            normalized_name: h.name.toLowerCase().trim(),
+            type: h.type || "unknown",
+            action: h.action || "mentioned"
           });
-        }
-        sessionRepo.updateSessionNLP(dbSess.id, summary, newEntities);
-        processed++;
-        const isEntitiesPhase = processed > rawSessions.length * 0.7;
-        if (processed % 5 === 0 || processed === rawSessions.length) {
-          emit({
-            stage: isEntitiesPhase ? "nlp_entities" : "nlp_summaries",
-            percent: 20 + Math.round(processed / rawSessions.length * 80),
-            label: isEntitiesPhase ? "Resolvendo Entidades" : "Processando Resumos (Batch)",
-            detail: `${processed} / ${rawSessions.length} sessões analisadas...`,
-            chatId
-            // Note: sending chatId along to identify bg process per chat
-          });
-        }
+        d.updateSessionNLP(p.id, T, L), c++;
+        const A = c > t.length * 0.7;
+        (c % 5 === 0 || c === t.length) && r({
+          stage: A ? "nlp_entities" : "nlp_summaries",
+          percent: 20 + Math.round(c / t.length * 80),
+          label: A ? "Resolvendo Entidades" : "Processando Resumos (Batch)",
+          detail: `${c} / ${t.length} sessões analisadas...`,
+          chatId: e
+          // Note: sending chatId along to identify bg process per chat
+        });
       }
-      emit({ stage: "done", percent: 100, label: "Concluído", detail: `Entidades Indexadas para o chat.`, chatId });
-    } catch (err) {
-      console.error("[Background NLP Exception]", err);
+      r({ stage: "done", percent: 100, label: "Concluído", detail: "Entidades Indexadas para o chat.", chatId: e });
+    } catch (i) {
+      console.error("[Background NLP Exception]", i);
     }
   }
 }
-function computeFileHash(filePath) {
-  return new Promise((resolve, reject) => {
-    const hash = createHash("sha256");
-    const stream = createReadStream(filePath);
-    stream.on("data", (chunk) => hash.update(chunk));
-    stream.on("end", () => resolve(hash.digest("hex")));
-    stream.on("error", reject);
+function It(n) {
+  return new Promise((e, t) => {
+    const s = Le("sha256"), a = K(n);
+    a.on("data", (r) => s.update(r)), a.on("end", () => e(s.digest("hex"))), a.on("error", t);
   });
 }
-const importService = new ChatImportService();
-function registerImportHandlers(win2) {
-  ipcMain.handle("import:chat", async (_event, filePath) => {
-    return importService.import(filePath, win2.webContents);
-  });
-  ipcMain.handle("import:file-dialog", async () => {
-    const result = await dialog.showOpenDialog(win2, {
+const Rt = new St();
+function yt(n) {
+  f.handle("import:chat", async (e, t) => Rt.import(t, n.webContents)), f.handle("import:file-dialog", async () => {
+    const e = await Ee.showOpenDialog(n, {
       title: "Selecionar export do WhatsApp",
       filters: [
         { name: "WhatsApp Export", extensions: ["txt", "zip"] },
@@ -2054,24 +1762,15 @@ function registerImportHandlers(win2) {
       ],
       properties: ["openFile"]
     });
-    if (result.canceled || result.filePaths.length === 0) return null;
-    return result.filePaths[0];
+    return e.canceled || e.filePaths.length === 0 ? null : e.filePaths[0];
   });
 }
-function registerModelHandlers(win2) {
-  const manager = ModelManager.getInstance();
-  ipcMain.handle("models:check", async () => {
-    return manager.checkAll();
-  });
-  ipcMain.handle("models:download", async (_, key) => {
-    return manager.download(key, (progress) => {
-      if (!win2.isDestroyed()) {
-        win2.webContents.send("models:progress", progress);
-      }
-    });
-  });
-  ipcMain.handle("models:select-file", async () => {
-    const result = await dialog.showOpenDialog(win2, {
+function Lt(n) {
+  const e = v.getInstance();
+  f.handle("models:check", async () => e.checkAll()), f.handle("models:download", async (t, s) => e.download(s, (a) => {
+    n.isDestroyed() || n.webContents.send("models:progress", a);
+  })), f.handle("models:select-file", async () => {
+    const t = await Ee.showOpenDialog(n, {
       title: "Selecionar Modelo GGUF (BYOM)",
       filters: [
         { name: "GGUF Models", extensions: ["gguf"] },
@@ -2079,570 +1778,453 @@ function registerModelHandlers(win2) {
       ],
       properties: ["openFile"]
     });
-    if (result.canceled || result.filePaths.length === 0) return null;
-    return result.filePaths[0];
+    return t.canceled || t.filePaths.length === 0 ? null : t.filePaths[0];
   });
 }
-const _SearchService = class _SearchService {
+const F = class F {
   constructor() {
-    __publicField(this, "chatRepo");
-    __publicField(this, "sessionRepo");
-    __publicField(this, "messageRepo");
-    const db = DatabaseService.getInstance();
-    this.chatRepo = new ChatRepository(db);
-    this.sessionRepo = new SessionRepository(db);
-    this.messageRepo = new MessageRepository(db);
+    E(this, "chatRepo");
+    E(this, "sessionRepo");
+    E(this, "messageRepo");
+    const e = R.getInstance();
+    this.chatRepo = new b(e), this.sessionRepo = new G(e), this.messageRepo = new J(e);
   }
   static getInstance() {
-    if (!_SearchService.instance) {
-      _SearchService.instance = new _SearchService();
-    }
-    return _SearchService.instance;
+    return F.instance || (F.instance = new F()), F.instance;
   }
-  async search(query, options) {
-    console.log(`[SearchService] Resolving deterministic search for: "${query}"`);
-    const worker = WorkerProcess.getInstance();
-    const classification = await worker.classifyQuery(query);
-    console.log(`[SearchService] Intent: ${classification.intent} | Keywords: ${classification.keywords.join(", ")}`);
-    const intent = classification.intent;
-    const initialKeywords = classification.keywords && classification.keywords.length > 0 ? classification.keywords : [query];
-    const dbOptions = {
-      dateFrom: options == null ? void 0 : options.dateFrom,
-      dateTo: options == null ? void 0 : options.dateTo
+  async search(e, t) {
+    console.log(`[SearchService] Resolving deterministic search for: "${e}"`);
+    const s = B.getInstance(), a = await s.classifyQuery(e);
+    console.log(`[SearchService] Intent: ${a.intent} | Keywords: ${a.keywords.join(", ")}`);
+    const r = a.intent, i = a.keywords && a.keywords.length > 0 ? a.keywords : [e], o = {
+      dateFrom: t == null ? void 0 : t.dateFrom,
+      dateTo: t == null ? void 0 : t.dateTo
     };
-    console.log(`[SearchService] Executing Ontology Hop (Entity Expansion)...`);
-    const expandedKeywords = await worker.expandKeywords(initialKeywords);
-    const combinedKeywords = Array.from(/* @__PURE__ */ new Set([...initialKeywords, ...expandedKeywords]));
-    const topEntities = this.sessionRepo.searchAggregation(combinedKeywords, 8, dbOptions);
-    const entityNames = topEntities.map((e) => e.name);
-    if (entityNames.length > 0) {
-      console.log(`[SearchService] Ontology hop discovered relevant context entities: ${entityNames.join(", ")}`);
-    }
-    const finalKeywords = Array.from(/* @__PURE__ */ new Set([...combinedKeywords, ...entityNames]));
-    let results = this.performRouting(intent, finalKeywords, dbOptions);
-    if (results.length === 0) {
-      console.warn(`[SearchService] Data inexistent even after lexical and ontological expansions.`);
-    }
-    return results;
+    console.log("[SearchService] Executing Ontology Hop (Entity Expansion)...");
+    const d = await s.expandKeywords(i), c = Array.from(/* @__PURE__ */ new Set([...i, ...d])), m = this.sessionRepo.searchAggregation(c, 8, o).map((I) => I.name);
+    m.length > 0 && console.log(`[SearchService] Ontology hop discovered relevant context entities: ${m.join(", ")}`);
+    const p = Array.from(/* @__PURE__ */ new Set([...c, ...m]));
+    let g = this.performRouting(r, p, o);
+    return g.length === 0 && console.warn("[SearchService] Data inexistent even after lexical and ontological expansions."), g;
   }
-  performRouting(intent, keywords, dbOptions) {
-    const results = [];
-    if (intent === "aggregation") {
-      const aggs = this.sessionRepo.searchAggregation(keywords, 20, dbOptions);
-      if (aggs.length > 0) {
-        let content = "Aggregation Results:\n";
-        for (const a of aggs) {
-          content += `- Entity: ${a.name} (${a.type}) | Count: ${a.count}
+  performRouting(e, t, s) {
+    const a = [];
+    if (e === "aggregation") {
+      const r = this.sessionRepo.searchAggregation(t, 20, s);
+      if (r.length > 0) {
+        let i = `Aggregation Results:
 `;
-        }
-        results.push({
-          id: nanoid(),
+        for (const o of r)
+          i += `- Entity: ${o.name} (${o.type}) | Count: ${o.count}
+`;
+        a.push({
+          id: _(),
           chatId: "",
           chatName: "Global Aggregations",
           score: 1,
-          content,
+          content: i,
           date: (/* @__PURE__ */ new Date()).toISOString(),
           sender: "System",
           intent: "aggregation",
-          metadata: { items: aggs }
+          metadata: { items: r }
         });
       }
-    } else if (intent === "narrative") {
-      const sessions = this.sessionRepo.searchNarrative(keywords, 5, dbOptions);
-      for (const s of sessions) {
-        const chat = this.chatRepo.findById(s.chat_id);
-        results.push({
-          id: s.id,
-          chatId: s.chat_id,
-          chatName: (chat == null ? void 0 : chat.name) || "Unknown Chat",
+    } else if (e === "narrative") {
+      const r = this.sessionRepo.searchNarrative(t, 5, s);
+      for (const i of r) {
+        const o = this.chatRepo.findById(i.chat_id);
+        a.push({
+          id: i.id,
+          chatId: i.chat_id,
+          chatName: (o == null ? void 0 : o.name) || "Unknown Chat",
           score: 0.9,
           content: `SESSION SUMMARY
-${s.summary}`,
-          date: new Date(s.start_time * 1e3).toISOString(),
+${i.summary}`,
+          date: new Date(i.start_time * 1e3).toISOString(),
           sender: "System",
           intent: "narrative"
         });
       }
     } else {
-      const windows = this.messageRepo.searchFactual(keywords, 15, 5);
-      for (const window of windows) {
-        if (window.length === 0) continue;
-        const chat = this.chatRepo.findById(window[0].chat_id);
-        let contentBlock = "";
-        for (const msg of window) {
-          const date = new Date(msg.timestamp * 1e3);
-          const tStr = date.toISOString().split("T")[1].slice(0, 5);
-          contentBlock += `[${tStr}] ${msg.sender}: ${msg.content}
+      const r = this.messageRepo.searchFactual(t, 15, 5);
+      for (const i of r) {
+        if (i.length === 0) continue;
+        const o = this.chatRepo.findById(i[0].chat_id);
+        let d = "";
+        for (const c of i) {
+          const m = new Date(c.timestamp * 1e3).toISOString().split("T")[1].slice(0, 5);
+          d += `[${m}] ${c.sender}: ${c.content}
 `;
         }
-        results.push({
-          id: nanoid(),
-          chatId: window[0].chat_id,
-          chatName: (chat == null ? void 0 : chat.name) || "Unknown Chat",
+        a.push({
+          id: _(),
+          chatId: i[0].chat_id,
+          chatName: (o == null ? void 0 : o.name) || "Unknown Chat",
           score: 1,
-          content: contentBlock.trim(),
-          date: new Date(window[0].timestamp * 1e3).toISOString(),
-          sender: window[0].sender,
+          content: d.trim(),
+          date: new Date(i[0].timestamp * 1e3).toISOString(),
+          sender: i[0].sender,
           intent: "factual"
         });
       }
     }
-    return results;
+    return a;
   }
 };
-__publicField(_SearchService, "instance", null);
-let SearchService = _SearchService;
-function registerSearchHandlers() {
-  ipcMain.handle("search:query", async (_event, query, options) => {
+E(F, "instance", null);
+let z = F;
+function Ot() {
+  f.handle("search:query", async (n, e, t) => {
     try {
-      return await SearchService.getInstance().search(query, options);
-    } catch (err) {
-      console.error("[SearchHandlers] Error executing search:", err);
-      return [];
+      return await z.getInstance().search(e, t);
+    } catch (s) {
+      return console.error("[SearchHandlers] Error executing search:", s), [];
     }
   });
 }
-const _dirname = typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
-const _BrainProcess = class _BrainProcess {
+const At = typeof __dirname < "u" ? __dirname : N.dirname(Q(import.meta.url)), U = class U {
   constructor() {
-    __publicField(this, "worker", null);
-    __publicField(this, "pendingRequests", /* @__PURE__ */ new Map());
-    __publicField(this, "initializationPromise", null);
-    __publicField(this, "ready", false);
+    E(this, "worker", null);
+    E(this, "pendingRequests", /* @__PURE__ */ new Map());
+    E(this, "initializationPromise", null);
+    E(this, "ready", !1);
   }
   static getInstance() {
-    if (!_BrainProcess.instance) {
-      _BrainProcess.instance = new _BrainProcess();
-    }
-    return _BrainProcess.instance;
+    return U.instance || (U.instance = new U()), U.instance;
   }
   async initialize() {
-    if (this.ready) return;
-    if (this.initializationPromise) return this.initializationPromise;
-    this.initializationPromise = new Promise(async (resolve, reject) => {
+    if (!this.ready) {
+      if (this.initializationPromise) return this.initializationPromise;
+      this.initializationPromise = new Promise(async (e, t) => {
+        try {
+          console.log("[BrainProcess] Resolving Brain model path...");
+          const s = await v.getInstance().resolve("brain");
+          console.log("[BrainProcess] Forking Utility Process...");
+          const a = N.join(At, "brain-worker.js");
+          this.worker = me.fork(a, [], {
+            stdio: "inherit"
+          }), this.worker.on("message", (i) => this.handleWorkerMessage(i)), this.worker.on("exit", (i) => {
+            console.warn(`[BrainProcess] Utility process exited with code ${i}`), this.ready = !1, this.worker = null, this.rejectAllPending(new Error(`Brain Worker exited unexpectedly with code ${i}`));
+          });
+          const r = _();
+          this.pendingRequests.set(r, {
+            resolve: () => {
+              console.log("[BrainProcess] Utility Process initialized successfully."), this.ready = !0, e();
+            },
+            reject: t
+          }), this.worker.postMessage({
+            type: "init",
+            id: r,
+            payload: { modelPath: s }
+          });
+        } catch (s) {
+          console.error("[BrainProcess] Failed to initialize:", s), this.initializationPromise = null, t(s);
+        }
+      });
       try {
-        console.log("[BrainProcess] Resolving Brain model path...");
-        const modelPath = await ModelManager.getInstance().resolve("brain");
-        console.log("[BrainProcess] Forking Utility Process...");
-        const workerPath = path.join(_dirname, "brain-worker.js");
-        this.worker = utilityProcess.fork(workerPath, [], {
-          stdio: "inherit"
-        });
-        this.worker.on("message", (msg) => this.handleWorkerMessage(msg));
-        this.worker.on("exit", (code) => {
-          console.warn(`[BrainProcess] Utility process exited with code ${code}`);
-          this.ready = false;
-          this.worker = null;
-          this.rejectAllPending(new Error(`Brain Worker exited unexpectedly with code ${code}`));
-        });
-        const id = nanoid();
-        this.pendingRequests.set(id, {
-          resolve: () => {
-            console.log("[BrainProcess] Utility Process initialized successfully.");
-            this.ready = true;
-            resolve();
-          },
-          reject
-        });
-        this.worker.postMessage({
-          type: "init",
-          id,
-          payload: { modelPath }
-        });
-      } catch (err) {
-        console.error("[BrainProcess] Failed to initialize:", err);
+        await this.initializationPromise;
+      } finally {
         this.initializationPromise = null;
-        reject(err);
       }
-    });
-    try {
-      await this.initializationPromise;
-    } finally {
-      this.initializationPromise = null;
     }
   }
   isReady() {
     return this.ready;
   }
-  async generate(prompt, options) {
-    return this.generateStream(prompt, () => {
-    }, options);
+  async generate(e, t) {
+    return this.generateStream(e, () => {
+    }, t);
   }
-  async generateStream(prompt, onToken, options) {
-    if (!this.ready || !this.worker) {
-      await this.initialize();
-    }
-    return new Promise((resolve, reject) => {
-      const id = nanoid();
-      this.pendingRequests.set(id, { resolve, reject, onToken });
-      this.worker.postMessage({
+  async generateStream(e, t, s) {
+    return (!this.ready || !this.worker) && await this.initialize(), new Promise((a, r) => {
+      const i = _();
+      this.pendingRequests.set(i, { resolve: a, reject: r, onToken: t }), this.worker.postMessage({
         type: "generate",
-        id,
-        payload: { prompt, options }
+        id: i,
+        payload: { prompt: e, options: s }
       });
     });
   }
   getModelInfo() {
     return {
-      modelName: MODEL_REGISTRY.brain.name,
+      modelName: P.brain.name,
       parameters: "4B"
     };
   }
   async dispose() {
-    if (!this.worker) return;
-    console.log("[BrainProcess] Disposing worker...");
-    this.worker.postMessage({ type: "dispose" });
-    await new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        if (this.worker) this.worker.kill();
-        resolve();
+    this.worker && (console.log("[BrainProcess] Disposing worker..."), this.worker.postMessage({ type: "dispose" }), await new Promise((e) => {
+      const t = setTimeout(() => {
+        this.worker && this.worker.kill(), e();
       }, 2e3);
       this.worker.once("exit", () => {
-        clearTimeout(timeout);
-        resolve();
+        clearTimeout(t), e();
       });
-    });
-    this.worker = null;
-    this.ready = false;
-    this.rejectAllPending(new Error("BrainProcess is disposing or shutting down"));
-    this.initializationPromise = null;
+    }), this.worker = null, this.ready = !1, this.rejectAllPending(new Error("BrainProcess is disposing or shutting down")), this.initializationPromise = null);
   }
-  handleWorkerMessage(msg) {
-    const { type, id, error, token, text } = msg;
-    if (!id || !this.pendingRequests.has(id)) {
-      if (type === "error") {
-        console.error(`[BrainWorker Global Error]`, error);
-      }
+  handleWorkerMessage(e) {
+    const { type: t, id: s, error: a, token: r, text: i } = e;
+    if (!s || !this.pendingRequests.has(s)) {
+      t === "error" && console.error("[BrainWorker Global Error]", a);
       return;
     }
-    const { resolve, reject, onToken } = this.pendingRequests.get(id);
-    switch (type) {
+    const { resolve: o, reject: d, onToken: c } = this.pendingRequests.get(s);
+    switch (t) {
       case "init-ready":
-        this.pendingRequests.delete(id);
-        resolve();
+        this.pendingRequests.delete(s), o();
         break;
       case "token":
-        if (onToken && token) onToken(token);
+        c && r && c(r);
         break;
       case "done":
-        this.pendingRequests.delete(id);
-        resolve(text);
+        this.pendingRequests.delete(s), o(i);
         break;
       case "error":
-        this.pendingRequests.delete(id);
-        reject(new Error(error));
+        this.pendingRequests.delete(s), d(new Error(a));
         break;
       default:
-        console.warn(`[BrainWorker] Unrecognized message type '${type}'`);
+        console.warn(`[BrainWorker] Unrecognized message type '${t}'`);
     }
   }
-  rejectAllPending(error) {
-    for (const [id, req] of this.pendingRequests.entries()) {
-      req.reject(error);
-      this.pendingRequests.delete(id);
-    }
+  rejectAllPending(e) {
+    for (const [t, s] of this.pendingRequests.entries())
+      s.reject(e), this.pendingRequests.delete(t);
   }
 };
-__publicField(_BrainProcess, "instance", null);
-let BrainProcess = _BrainProcess;
-const BrainProcess$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+E(U, "instance", null);
+let Y = U;
+const ge = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
-  BrainProcess
-}, Symbol.toStringTag, { value: "Module" }));
-const promptTemplates = {
-  buildRAGPrompt: (question, chunks) => {
-    const formattedChunks = chunks.map((c) => `[${c.date} - ${c.sender}]: ${c.content}`).join("\n\n");
-    let dateContext = "";
-    if (chunks.length > 0) {
-      const dates = chunks.map((c) => new Date(c.date).getTime()).filter((t) => !isNaN(t));
-      if (dates.length > 0) {
-        const minDate = new Date(Math.min(...dates)).toISOString().split("T")[0];
-        const maxDate = new Date(Math.max(...dates)).toISOString().split("T")[0];
-        dateContext = `
-Regra OBRIGATÓRIA: Baseie-se EXATAMENTE nas datas providenciadas no prompt (de ${minDate} a ${maxDate}). Nunca alucine datas ou informações fora desse intervalo.`;
+  BrainProcess: Y
+}, Symbol.toStringTag, { value: "Module" })), wt = {
+  buildRAGPrompt: (n, e) => {
+    const t = e.map((i) => `[${i.date} - ${i.sender}]: ${i.content}`).join(`
+
+`);
+    let s = "";
+    if (e.length > 0) {
+      const i = e.map((o) => new Date(o.date).getTime()).filter((o) => !isNaN(o));
+      if (i.length > 0) {
+        const o = new Date(Math.min(...i)).toISOString().split("T")[0], d = new Date(Math.max(...i)).toISOString().split("T")[0];
+        s = `
+Regra OBRIGATÓRIA: Baseie-se EXATAMENTE nas datas providenciadas no prompt (de ${o} a ${d}). Nunca alucine datas ou informações fora desse intervalo.`;
       }
     }
-    const systemPrompt = `Você é um assistente cirúrgico que extrai informações de dados históricos. Baseie sua resposta APENAS no contexto fornecido.${dateContext}`;
-    const userPrompt = `DADOS E CONTEXTO OBTIDOS (Fontes imutáveis):
-${formattedChunks}
+    const a = `Você é um assistente cirúrgico que extrai informações de dados históricos. Baseie sua resposta APENAS no contexto fornecido.${s}`, r = `DADOS E CONTEXTO OBTIDOS (Fontes imutáveis):
+${t}
 
-PERGUNTA DO USUÁRIO: ${question}
+PERGUNTA DO USUÁRIO: ${n}
 
 Responda EXATAMENTE o que foi perguntado, formatando de maneira limpa. Se a resposta não estiver nos dados, declare tratar-se de "dados inexistentes".`;
-    return { systemPrompt, userPrompt };
+    return { systemPrompt: a, userPrompt: r };
   }
-};
-const DEFAULT_SETTINGS = {
+}, q = {
   gpu: "auto",
   temperature: 0.3,
   systemPrompt: "Você é um assistente encarregado de ler históricos de chat. Responda apenas com o que estiver no contexto.",
   topK: 15,
-  history: true,
-  analytics: false,
+  history: !0,
+  analytics: !1,
   customBrainPath: null,
-  customWorkerPath: null
-};
-const _SettingsService = class _SettingsService {
+  customWorkerPath: null,
+  customEmbeddingPath: null
+}, C = class C {
   constructor() {
-    __publicField(this, "settingsPath");
-    __publicField(this, "currentSettings");
-    const userData = app.getPath("userData");
-    this.settingsPath = path$1.join(userData, "settings.json");
-    this.currentSettings = { ...DEFAULT_SETTINGS };
-    this.load();
+    E(this, "settingsPath");
+    E(this, "currentSettings");
+    const e = O.getPath("userData");
+    this.settingsPath = Ae.join(e, "settings.json"), this.currentSettings = { ...q }, this.load();
   }
   static getInstance() {
-    if (!_SettingsService.instance) {
-      _SettingsService.instance = new _SettingsService();
-    }
-    return _SettingsService.instance;
+    return C.instance || (C.instance = new C()), C.instance;
   }
   get() {
     return { ...this.currentSettings };
   }
-  update(partial) {
-    const hasGpuChanged = partial.gpu !== void 0 && partial.gpu !== this.currentSettings.gpu;
-    const hasBrainChanged = "customBrainPath" in partial && partial.customBrainPath !== this.currentSettings.customBrainPath;
-    const hasWorkerChanged = "customWorkerPath" in partial && partial.customWorkerPath !== this.currentSettings.customWorkerPath;
-    this.currentSettings = {
+  update(e) {
+    const t = e.gpu !== void 0 && e.gpu !== this.currentSettings.gpu, s = "customBrainPath" in e && e.customBrainPath !== this.currentSettings.customBrainPath, a = "customWorkerPath" in e && e.customWorkerPath !== this.currentSettings.customWorkerPath;
+    return this.currentSettings = {
       ...this.currentSettings,
-      ...partial
-    };
-    this.save();
-    if (hasGpuChanged || hasBrainChanged || hasWorkerChanged) {
-      setTimeout(async () => {
-        console.log("[SettingsService] Critical backend setting changed. Disposing active models for cold-restart.");
-        const { WorkerProcess: WorkerProcess2 } = await Promise.resolve().then(() => WorkerProcess$1);
-        const { BrainProcess: BrainProcess2 } = await Promise.resolve().then(() => BrainProcess$1);
-        try {
-          WorkerProcess2.getInstance().dispose();
-        } catch (e) {
-        }
-        try {
-          BrainProcess2.getInstance().dispose();
-        } catch (e) {
-        }
-      }, 0);
-    }
-    return this.get();
+      ...e
+    }, this.save(), (t || s || a) && setTimeout(async () => {
+      console.log("[SettingsService] Critical backend setting changed. Disposing active models for cold-restart.");
+      const { WorkerProcess: r } = await Promise.resolve().then(() => he), { BrainProcess: i } = await Promise.resolve().then(() => ge);
+      try {
+        r.getInstance().dispose();
+      } catch {
+      }
+      try {
+        i.getInstance().dispose();
+      } catch {
+      }
+    }, 0), this.get();
   }
   load() {
     try {
-      if (fs$1.existsSync(this.settingsPath)) {
-        const data = fs$1.readFileSync(this.settingsPath, "utf-8");
-        const parsed = JSON.parse(data);
+      if (W.existsSync(this.settingsPath)) {
+        const e = W.readFileSync(this.settingsPath, "utf-8"), t = JSON.parse(e);
         this.currentSettings = {
-          ...DEFAULT_SETTINGS,
-          ...parsed
+          ...q,
+          ...t
         };
-      } else {
+      } else
         this.save();
-      }
-    } catch (error) {
-      console.error("[SettingsService] Failed to load settings:", error);
-      this.currentSettings = { ...DEFAULT_SETTINGS };
+    } catch (e) {
+      console.error("[SettingsService] Failed to load settings:", e), this.currentSettings = { ...q };
     }
   }
   save() {
     try {
-      fs$1.writeFileSync(this.settingsPath, JSON.stringify(this.currentSettings, null, 2));
-    } catch (error) {
-      console.error("[SettingsService] Failed to save settings:", error);
+      W.writeFileSync(this.settingsPath, JSON.stringify(this.currentSettings, null, 2));
+    } catch (e) {
+      console.error("[SettingsService] Failed to save settings:", e);
     }
   }
 };
-__publicField(_SettingsService, "instance");
-let SettingsService = _SettingsService;
-const _RAGService = class _RAGService {
+E(C, "instance");
+let X = C;
+const x = class x {
   constructor() {
   }
   static getInstance() {
-    if (!_RAGService.instance) {
-      _RAGService.instance = new _RAGService();
-    }
-    return _RAGService.instance;
+    return x.instance || (x.instance = new x()), x.instance;
   }
-  async generateStream(question, onToken, options, onStep) {
-    const totalStart = performance.now();
-    const latency = { embedding: 0, search: 0, generation: 0, total: 0 };
-    let context = [];
+  async generateStream(e, t, s, a) {
+    const r = performance.now(), i = { embedding: 0, search: 0, generation: 0, total: 0 };
+    let o = [];
     try {
-      if (onStep) onStep("booting");
-      const config = SettingsService.getInstance().get();
-      if (onStep) onStep("searching");
-      const searchStart = performance.now();
-      context = await SearchService.getInstance().search(question, {
-        limit: config.topK,
-        chatId: options == null ? void 0 : options.chatId
-      });
-      latency.search = performance.now() - searchStart;
-      if (context.length === 0) {
-        latency.total = performance.now() - totalStart;
-        return {
+      a && a("booting");
+      const d = X.getInstance().get();
+      a && a("searching");
+      const c = performance.now();
+      if (o = await z.getInstance().search(e, {
+        limit: d.topK,
+        chatId: s == null ? void 0 : s.chatId
+      }), i.search = performance.now() - c, o.length === 0)
+        return i.total = performance.now() - r, {
           answer: "Dados inexistentes. Não foi possível localizar o contexto ou menções referentes à sua busca neste chat.",
-          context,
+          context: o,
           tokensUsed: 0,
-          latency
+          latency: i
         };
-      }
-      if (onStep) onStep("processing");
-      const { userPrompt } = promptTemplates.buildRAGPrompt(question, context);
-      const systemPrompt = config.systemPrompt;
-      if (onStep) onStep("synthesizing");
-      const generationStart = performance.now();
-      const brainProcess = BrainProcess.getInstance();
-      let answer = "";
-      let tokensUsed = 0;
+      a && a("processing");
+      const { userPrompt: l } = wt.buildRAGPrompt(e, o), m = d.systemPrompt;
+      a && a("synthesizing");
+      const p = performance.now(), g = Y.getInstance();
+      let I = "", T = 0;
       try {
-        answer = await brainProcess.generateStream(
-          userPrompt,
-          (token) => {
-            tokensUsed++;
-            if (onToken) onToken(token);
+        I = await g.generateStream(
+          l,
+          (y) => {
+            T++, t && t(y);
           },
           {
-            temperature: (options == null ? void 0 : options.temperature) ?? config.temperature,
-            maxTokens: (options == null ? void 0 : options.maxTokens) || 1024,
-            systemPrompt
+            temperature: (s == null ? void 0 : s.temperature) ?? d.temperature,
+            maxTokens: (s == null ? void 0 : s.maxTokens) || 1024,
+            systemPrompt: m
           }
         );
-      } catch (llmError) {
-        console.error("[RAGService] Error generating response from BrainProcess:", llmError);
-        answer = "Desculpe, ocorreu um erro ao gerar a resposta ou a IA falhou.\n\nContexto encontrado:" + context.map((c, i) => `
-[${i + 1}] ${c.date} ${c.sender}: ${c.content}`).join("");
+      } catch (y) {
+        console.error("[RAGService] Error generating response from BrainProcess:", y), I = `Desculpe, ocorreu um erro ao gerar a resposta ou a IA falhou.
+
+Contexto encontrado:` + o.map((L, A) => `
+[${A + 1}] ${L.date} ${L.sender}: ${L.content}`).join("");
       }
-      latency.generation = performance.now() - generationStart;
-      latency.total = performance.now() - totalStart;
-      return {
-        answer,
-        context,
-        tokensUsed,
-        latency
+      return i.generation = performance.now() - p, i.total = performance.now() - r, {
+        answer: I,
+        context: o,
+        tokensUsed: T,
+        latency: i
       };
-    } catch (err) {
-      console.error("[RAGService] Fatal error in RAG pipeline:", err);
-      throw err;
+    } catch (d) {
+      throw console.error("[RAGService] Fatal error in RAG pipeline:", d), d;
     }
   }
 };
-__publicField(_RAGService, "instance", null);
-let RAGService = _RAGService;
-function registerRagHandlers(win2) {
-  ipcMain.handle("rag:query", async (_event, question, options) => {
+E(x, "instance", null);
+let V = x;
+function Dt(n) {
+  f.handle("rag:query", async (e, t, s) => {
     try {
-      const ragService = RAGService.getInstance();
-      const response = await ragService.generateStream(
-        question,
-        (token) => {
-          win2.webContents.send("rag:token", token);
+      const r = await V.getInstance().generateStream(
+        t,
+        (i) => {
+          n.webContents.send("rag:token", i);
         },
-        options,
-        (step) => {
-          win2.webContents.send("rag:step", step);
+        s,
+        (i) => {
+          n.webContents.send("rag:step", i);
         }
       );
-      win2.webContents.send("rag:done", response);
-    } catch (error) {
-      console.error("[IPC rag:query] Error:", error);
-      throw error;
+      n.webContents.send("rag:done", r);
+    } catch (a) {
+      throw console.error("[IPC rag:query] Error:", a), a;
     }
-  });
-  ipcMain.handle("rag:status", async () => {
-    const { BrainProcess: BrainProcess2 } = await Promise.resolve().then(() => BrainProcess$1);
-    const { WorkerProcess: WorkerProcess2 } = await Promise.resolve().then(() => WorkerProcess$1);
+  }), f.handle("rag:status", async () => {
+    const { BrainProcess: e } = await Promise.resolve().then(() => ge), { WorkerProcess: t } = await Promise.resolve().then(() => he);
     return {
       brain: {
-        ready: BrainProcess2.getInstance().isReady()
+        ready: e.getInstance().isReady()
       },
       worker: {
-        ready: WorkerProcess2.getInstance().isReady(),
-        fallback: WorkerProcess2.getInstance().getFallbackStatus()
+        ready: t.getInstance().isReady(),
+        fallback: t.getInstance().getFallbackStatus()
       }
     };
   });
 }
-function registerSettingsHandlers() {
-  ipcMain.handle("settings:get", async () => {
-    return SettingsService.getInstance().get();
-  });
-  ipcMain.handle("settings:update", async (_event, partial) => {
-    return SettingsService.getInstance().update(partial);
-  });
+function kt() {
+  f.handle("settings:get", async () => X.getInstance().get()), f.handle("settings:update", async (n, e) => X.getInstance().update(e));
 }
-function registerAllHandlers(win2) {
-  registerChatHandlers();
-  registerImportHandlers(win2);
-  registerModelHandlers(win2);
-  registerSearchHandlers();
-  registerRagHandlers(win2);
-  registerSettingsHandlers();
+function Ft(n) {
+  at(), yt(n), Lt(n), Ot(), Dt(n), kt();
 }
-const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
-process.env.APP_ROOT = path.join(__dirname$1, "..");
-const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
-const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
-const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
-process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
-let win;
-function createWindow() {
-  win = new BrowserWindow({
+const _e = N.dirname(Q(import.meta.url));
+process.env.APP_ROOT = N.join(_e, "..");
+const j = process.env.VITE_DEV_SERVER_URL, Yt = N.join(process.env.APP_ROOT, "dist-electron"), fe = N.join(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = j ? N.join(process.env.APP_ROOT, "public") : fe;
+let u;
+function Ne() {
+  u = new ue({
     width: 1280,
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    frame: false,
+    frame: !1,
     // Custom titlebar
     titleBarStyle: "hidden",
     backgroundColor: "#080b0d",
-    show: false,
+    show: !1,
     // Prevent white flash
     webPreferences: {
-      preload: path.join(__dirname$1, "preload.mjs"),
-      contextIsolation: true,
-      nodeIntegration: false
+      preload: N.join(_e, "preload.mjs"),
+      contextIsolation: !0,
+      nodeIntegration: !1
     }
-  });
-  win.once("ready-to-show", () => {
-    win == null ? void 0 : win.show();
-  });
-  ipcMain.on("window:minimize", () => win == null ? void 0 : win.minimize());
-  ipcMain.on("window:maximize", () => {
-    if (win == null ? void 0 : win.isMaximized()) win.unmaximize();
-    else win == null ? void 0 : win.maximize();
-  });
-  ipcMain.on("window:close", () => win == null ? void 0 : win.close());
-  registerAllHandlers(win);
-  if (VITE_DEV_SERVER_URL) {
-    win.loadURL(VITE_DEV_SERVER_URL);
-    win.webContents.openDevTools({ mode: "detach" });
-  } else {
-    win.loadFile(path.join(RENDERER_DIST, "index.html"));
-  }
+  }), u.once("ready-to-show", () => {
+    u == null || u.show();
+  }), f.on("window:minimize", () => u == null ? void 0 : u.minimize()), f.on("window:maximize", () => {
+    u != null && u.isMaximized() ? u.unmaximize() : u == null || u.maximize();
+  }), f.on("window:close", () => u == null ? void 0 : u.close()), Ft(u), j ? (u.loadURL(j), u.webContents.openDevTools({ mode: "detach" })) : u.loadFile(N.join(fe, "index.html"));
 }
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-    win = null;
-  }
+O.on("window-all-closed", () => {
+  process.platform !== "darwin" && (O.quit(), u = null);
 });
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
+O.on("activate", () => {
+  ue.getAllWindows().length === 0 && Ne();
 });
-app.on("before-quit", () => {
-  DatabaseService.close();
+O.on("before-quit", () => {
+  R.close();
 });
-app.whenReady().then(() => {
+O.whenReady().then(() => {
   try {
-    DatabaseService.getInstance();
-  } catch (err) {
-    console.error("[Main] Failed to initialize database:", err);
+    R.getInstance();
+  } catch (n) {
+    console.error("[Main] Failed to initialize database:", n);
   }
-  createWindow();
+  Ne();
 });
 export {
-  MAIN_DIST,
-  RENDERER_DIST,
-  VITE_DEV_SERVER_URL
+  Yt as MAIN_DIST,
+  fe as RENDERER_DIST,
+  j as VITE_DEV_SERVER_URL
 };

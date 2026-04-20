@@ -288,6 +288,61 @@ Keywords: ${JSON.stringify(keywords)}
     return keywords;
   }
 
+  async extractSessionEntities(sessionText: string): Promise<import('../../shared/types').SessionExtractionResult> {
+    const prompt = `You are a strict JSON extraction tool. Analyze this chat session and extract third-party mentions.
+Output ONLY raw JSON. Do not output markdown, explanations, or conversational text.
+
+Rules:
+1. "summary": A 1-sentence summary of what happened in the session.
+2. "mentioned_entities": An array of entities (people, organizations) mentioned.
+   - Ignore generic nouns or brands unless they are the primary subject.
+   - "name": The extracted name.
+   - "type": "person" | "organization" | "other"
+   - "context": EXACT words or a very close paraphrase of what was said about them in the chat.
+   - "sentiment": "positive" | "negative" | "neutral"
+   - "is_participant": true if this person is one of the chat participants, false if it's a third-party mention.
+
+Schema:
+{
+  "summary": "str",
+  "mentioned_entities": [
+    { "name": "str", "type": "str", "context": "str", "sentiment": "str", "is_participant": boolean }
+  ]
+}
+
+Session Text:
+${sessionText}
+`;
+
+    const options: GenerateOptions = {
+      temperature: 0.1,
+      maxTokens: 500,
+      systemPrompt: "You are a headless JSON API. You MUST respond with valid JSON matching the exact schema."
+    };
+
+    const startTime = Date.now();
+    try {
+      const res = await this.generateJson<import('../../shared/types').SessionExtractionResult>(prompt, options, 3);
+      const duration = Date.now() - startTime;
+      console.log(`[WorkerProcess] extractSessionEntities completed in ${duration}ms`);
+      
+      // Ensure safe return structure
+      return {
+        summary: res.summary || "Sessão extraída",
+        mentioned_entities: Array.isArray(res.mentioned_entities) ? res.mentioned_entities : []
+      };
+    } catch (e: any) {
+      const duration = Date.now() - startTime;
+      console.error(`[WorkerProcess] extractSessionEntities completely failed after ${duration}ms:`, e.message);
+      
+      // Graceful degradation / Fallback
+      return {
+        summary: "Sessão extraída via fallback de erro",
+        mentioned_entities: []
+      };
+    }
+  }
+
   private async processNextInQueue() {
     if (this.processingQueue || this.batchQueue.length === 0) return;
     this.processingQueue = true;

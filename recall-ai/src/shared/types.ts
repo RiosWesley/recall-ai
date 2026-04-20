@@ -56,6 +56,19 @@ export interface NewMessage {
 
 // ─── SESSIONS & ENTITIES ────────────────────────────────────────────────────
 
+export interface MentionedEntity {
+  name: string;
+  type: string;
+  context: string;
+  sentiment: string;
+  is_participant: boolean;
+}
+
+export interface SessionExtractionResult {
+  summary: string;
+  mentioned_entities: MentionedEntity[];
+}
+
 export interface Session {
   id: string
   chat_id: string
@@ -296,5 +309,6 @@ export interface AppSettings {
   analytics: boolean
   customBrainPath: string | null
   customWorkerPath: string | null
+  customEmbeddingPath: string | null
 }
 

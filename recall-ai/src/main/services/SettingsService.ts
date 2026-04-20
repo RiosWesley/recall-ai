@@ -11,7 +11,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   history: true,
   analytics: false,
   customBrainPath: null,
-  customWorkerPath: null
+  customWorkerPath: null,
+  customEmbeddingPath: null
 }
 
 export class SettingsService {

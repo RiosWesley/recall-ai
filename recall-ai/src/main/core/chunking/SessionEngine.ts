@@ -9,14 +9,17 @@ export interface RawSession {
 
 export class SessionEngine {
   private readonly maxGapSeconds: number
+  private readonly maxTokens: number
 
-  constructor(maxGapSeconds = 7200) {
+  constructor(maxGapSeconds = 7200, maxTokens = 400) {
     this.maxGapSeconds = maxGapSeconds // Default 2 hours gap
+    this.maxTokens = maxTokens // Adaptive chunking limit
   }
 
   /**
    * Groups an array of parsed messages into temporal sessions.
-   * A new session starts when the gap between two messages exceeds `maxGapSeconds`.
+   * A new session starts when the gap between two messages exceeds `maxGapSeconds`,
+   * or when the estimated token count exceeds `maxTokens` (adaptive chunking).
    * Messages are assumed to be pre-sorted by timestamp ascending.
    */
   group(messages: ParsedMessage[]): RawSession[] {
@@ -28,13 +31,15 @@ export class SessionEngine {
     let currentSessionMessages: ParsedMessage[] = [sorted[0]!]
     let currentStartTime = sorted[0]!.timestamp
     let lastMsgTime = sorted[0]!.timestamp
+    let currentTokenEstimate = Math.ceil((sorted[0]!.content?.length || 0) / 4)
 
     for (let i = 1; i < sorted.length; i++) {
       const msg = sorted[i]!
       const gap = msg.timestamp - lastMsgTime
+      const msgTokens = Math.ceil((msg.content?.length || 0) / 4)
 
-      if (gap > this.maxGapSeconds) {
-        // Gap exceeded, close current session and start a new one
+      if (gap > this.maxGapSeconds || currentTokenEstimate + msgTokens > this.maxTokens) {
+        // Gap exceeded or max tokens reached, close current session and start a new one
         sessions.push({
           messages: currentSessionMessages,
           start_time: currentStartTime,
@@ -45,8 +50,10 @@ export class SessionEngine {
         // Start new session
         currentSessionMessages = [msg]
         currentStartTime = msg.timestamp
+        currentTokenEstimate = msgTokens
       } else {
         currentSessionMessages.push(msg)
+        currentTokenEstimate += msgTokens
       }
 
       lastMsgTime = msg.timestamp
