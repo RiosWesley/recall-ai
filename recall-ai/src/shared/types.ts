@@ -107,6 +107,46 @@ export interface NewEntity {
   action: string
 }
 
+// ─── PEOPLE & IDENTITY GRAPH ──────────────────────────────────────────────────
+
+export interface Person {
+  id: string
+  name: string
+  color: string
+  bio: string | null
+  message_count: number
+  created_at: number
+  last_seen: number
+}
+
+export interface PersonAlias {
+  person_id: string
+  alias: string
+}
+
+export interface PersonRelation {
+  source_id: string
+  target_id: string
+  relation_type: string | null
+  strength: number
+}
+
+export interface PersonMention {
+  session_id: string
+  person_id: string
+  context: string | null
+}
+
+export interface PendingMention {
+  id: string
+  sessionId: string
+  alias: string
+  context: string | null
+  timestamp: number
+}
+
+export type MentionResolutionAction = 'create_new' | 'link_existing' | 'ignore'
+
 // ─── PROFILE FACT ─────────────────────────────────────────────────────────────
 
 export type FactCategory = 'frequent_term' | 'topic' | 'dynamics' | 'co_occurrence'

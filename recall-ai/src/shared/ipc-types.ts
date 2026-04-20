@@ -59,6 +59,11 @@ export interface ElectronAPI {
   getSettings(): Promise<import('./types').AppSettings>
   updateSettings(partial: Partial<import('./types').AppSettings>): Promise<import('./types').AppSettings>
 
+  // ── People & Mentions ───────────────────────────────────────────────────────
+  getPendingMentions(): Promise<import('./types').PendingMention[]>
+  resolveMention(mentionId: string, action: import('./types').MentionResolutionAction, personId?: string): Promise<void>
+  onMentionDetected(cb: (mention: import('./types').PendingMention) => void): () => void
+
   // ── Window controls ─────────────────────────────────────────────────────────
   windowMinimize(): void
   windowMaximize(): void

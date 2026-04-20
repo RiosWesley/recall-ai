@@ -13,22 +13,17 @@ import { DatabaseService } from '../db/database'
 import { ChatRepository } from '../db/repositories/ChatRepository'
 import { MessageRepository } from '../db/repositories/MessageRepository'
 import { SessionRepository } from '../db/repositories/SessionRepository'
+import { PersonRepository } from '../db/repositories/PersonRepository'
 
 import { WhatsAppParser } from '../core/parser/WhatsAppParser'
 import { SessionEngine } from '../core/chunking/SessionEngine'
 import { WorkerProcess } from './WorkerProcess'
+import { PendingMentionsManager } from './PendingMentionsManager'
 
 import type { ImportProgress, ImportResult } from '../../shared/types'
 import type { NewMessage, NewSession, NewEntity } from '../../shared/types'
 
-interface ExtractedJSON {
-  summary: string
-  entities: Array<{
-    name: string
-    type: string
-    action: string
-  }>
-}
+// Removed ExtractedJSON since it is no longer used
 
 export class ChatImportService {
   private readonly parser = new WhatsAppParser()
@@ -166,43 +161,49 @@ export class ChatImportService {
         const dbSess = dbSessions[i]
         const convoContext = rawSess.messages.map(m => `[${new Date(m.timestamp * 1000).toISOString()}] ${m.sender}: ${m.content}`).join('\n')
         
-        // Strict JSON prompt
-        const prompt = `Read the following chat session and extract the main summary and any notable entities mentioned (names, places, topics) along with their action/intent.
-Respond ONLY with a valid JSON strictly matching this schema:
-{
-  "summary": "general summary of what happened",
-  "entities": [
-    { "name": "Raw Name", "type": "person/place/game/topic", "action": "What they did or intent" }
-  ]
-}
-
-CHAT SESSION:
-${convoContext}`
-
         let summary = "Sessão concluída (sem detalhes extraídos)"
-        let extractedEntities: any[] = []
+        let extractedEntities: import('../../shared/types').MentionedEntity[] = []
 
         try {
-          const result = await worker.generateJson<ExtractedJSON>(prompt, { maxTokens: 800, temperature: 0.1 }, 3)
+          const result = await worker.extractSessionEntities(convoContext)
           if (result.summary) summary = result.summary
-          if (result.entities && Array.isArray(result.entities)) {
-            extractedEntities = result.entities
+          if (result.mentioned_entities) {
+            extractedEntities = result.mentioned_entities
           }
         } catch(e: any) {
           console.warn('[ChatImportService Worker] Worker extraction failed on session:', e.message)
         }
 
         const newEntities: NewEntity[] = []
+        const personRepo = new PersonRepository(db)
+        const inbox = PendingMentionsManager.getInstance()
+
         for (const ent of extractedEntities) {
           if (!ent.name) continue
+          
+          // Map to legacy 'entities' table for general Search Index
           newEntities.push({
             id: nanoid(),
             session_id: dbSess.id!,
             name: ent.name,
             normalized_name: ent.name.toLowerCase().trim(),
             type: ent.type || 'unknown',
-            action: ent.action || 'mentioned'
+            action: ent.context || 'mentioned'
           })
+
+          // Phase 6 Identity Graph mapping
+          if (!ent.is_participant && ent.type === 'person') {
+            const matches = personRepo.findProbableMatch(ent.name)
+            // Auto-resolve if exactly 1 perfect match is found
+            const exactMatch = matches.find(m => m.name.toLowerCase() === ent.name.toLowerCase())
+            if (exactMatch) {
+              personRepo.linkMention(dbSess.id!, exactMatch.id, ent.context)
+            } else {
+              // Ambiguous or New -> send to Inbox
+              const pending = inbox.addMention(dbSess.id!, ent.name, ent.context)
+              sender?.send('ingest:mention_detected', pending)
+            }
+          }
         }
 
         // Update this session in Database
