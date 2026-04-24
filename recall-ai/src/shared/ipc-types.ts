@@ -61,6 +61,8 @@ export interface ElectronAPI {
 
   // ── People & Mentions ───────────────────────────────────────────────────────
   getPendingMentions(): Promise<import('./types').PendingMention[]>
+  getPeople(): Promise<import('./types').Person[]>
+  getRelations(): Promise<import('./types').PersonRelation[]>
   resolveMention(mentionId: string, action: import('./types').MentionResolutionAction, personId?: string): Promise<void>
   onMentionDetected(cb: (mention: import('./types').PendingMention) => void): () => void
 

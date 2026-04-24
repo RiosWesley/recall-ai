@@ -20,6 +20,18 @@ export function registerPeopleHandlers() {
     return inbox.getPending()
   })
 
+  ipcMain.handle('mentions:get_people', async () => {
+    const db = DatabaseService.getInstance()
+    const repo = new PersonRepository(db)
+    return repo.findAll()
+  })
+
+  ipcMain.handle('mentions:get_relations', async () => {
+    const db = DatabaseService.getInstance()
+    const repo = new PersonRepository(db)
+    return repo.findAllRelations()
+  })
+
   ipcMain.handle('mentions:resolve', async (_event, mentionId: string, action: MentionResolutionAction, personId?: string) => {
     const mention = inbox.getMentionById(mentionId)
     if (!mention) {

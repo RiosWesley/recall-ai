@@ -4,6 +4,8 @@ import {
   Network, User, Edit3, Check, Plus
 } from 'lucide-react'
 import type { Page } from '../App'
+import { MentionInbox } from '../components/MentionInbox'
+import type { Person as DBPerson } from '../shared/types'
 
 interface PeoplePageProps {
   navigate: (page: Page) => void
@@ -30,110 +32,7 @@ interface Relation {
   strength: number // 0.0 – 1.0
 }
 
-const MOCK_PEOPLE: Person[] = [
-  {
-    id: 'p1',
-    name: 'Maria Santos',
-    initials: 'MS',
-    color: '#00d97e',
-    tags: ['família', 'próxima'],
-    messageCount: 4821,
-    chats: ['Maria — Família'],
-    lastSeen: 'há 2h',
-    bio: 'Irmã mais velha. Sempre tem uma receita nova para compartilhar.',
-    keyMemories: [
-      'Mandou a receita de bolo de cenoura em março de 2024',
-      'Planejamento da viagem de família para o carnaval',
-      'Indicou o médico especialista para a consulta',
-    ],
-  },
-  {
-    id: 'p2',
-    name: 'João Silva',
-    initials: 'JS',
-    color: '#38bdf8',
-    tags: ['amigo', 'trabalho'],
-    messageCount: 892,
-    chats: ['João Silva', 'Trabalho — Squad'],
-    lastSeen: 'há 3d',
-    bio: 'Amigo de longa data. Colega no projeto atual.',
-    keyMemories: [
-      'Confirmou a reunião de segunda-feira às 14h',
-      'Enviou o link do repositório do projeto',
-      'Lembrou do aniversário da empresa',
-    ],
-  },
-  {
-    id: 'p3',
-    name: 'Ana Pereira',
-    initials: 'AP',
-    color: '#f0a500',
-    tags: ['trabalho', 'squad'],
-    messageCount: 3200,
-    chats: ['Trabalho — Squad'],
-    lastSeen: 'há 1d',
-    bio: 'Tech lead do squad. Referência técnica do time.',
-    keyMemories: [
-      'Revisou o pull request da feature de autenticação',
-      'Compartilhou artigo sobre arquitetura de microsserviços',
-      'Organizou o planning da sprint 12',
-    ],
-  },
-  {
-    id: 'p4',
-    name: 'Carlos Mendes',
-    initials: 'CM',
-    color: '#a78bfa',
-    tags: ['trabalho'],
-    messageCount: 1540,
-    chats: ['Trabalho — Squad'],
-    lastSeen: 'há 5d',
-    bio: 'Designer do produto. Responsável pelo sistema de design.',
-    keyMemories: [
-      'Enviou os assets atualizados do Figma',
-      'Propôs redesign do onboarding',
-    ],
-  },
-  {
-    id: 'p5',
-    name: 'Beatriz Lima',
-    initials: 'BL',
-    color: '#f43f5e',
-    tags: ['família'],
-    messageCount: 2100,
-    chats: ['Maria — Família'],
-    lastSeen: 'há 1sem',
-    bio: 'Prima. Mora em São Paulo.',
-    keyMemories: [
-      'Avisou sobre o churrasco do próximo fim de semana',
-      'Pediu indicação de hotel em Florianópolis',
-    ],
-  },
-  {
-    id: 'p6',
-    name: 'Rafael Costa',
-    initials: 'RC',
-    color: '#06b6d4',
-    tags: ['amigo'],
-    messageCount: 450,
-    chats: ['João Silva'],
-    lastSeen: 'há 2sem',
-    bio: 'Amigo do João. Aparece eventualmente nas conversas.',
-    keyMemories: [
-      'Mencionado como organizador do churras do fim de ano',
-    ],
-  },
-]
-
-const MOCK_RELATIONS: Relation[] = [
-  { a: 'p1', b: 'p5', strength: 0.85 },  // Maria — Beatriz (família)
-  { a: 'p1', b: 'p2', strength: 0.45 },  // Maria — João
-  { a: 'p2', b: 'p3', strength: 0.9 },   // João — Ana (squad)
-  { a: 'p2', b: 'p4', strength: 0.75 },  // João — Carlos (squad)
-  { a: 'p3', b: 'p4', strength: 0.8 },   // Ana — Carlos (squad)
-  { a: 'p2', b: 'p6', strength: 0.5 },   // João — Rafael
-  { a: 'p1', b: 'p3', strength: 0.3 },   // Maria — Ana (fraco)
-]
+// Mocks removed, fetching from DB.
 
 // ─── Force-directed layout (simplified) ──────────────────────────────────────
 interface NodePos { id: string; x: number; y: number; vx: number; vy: number }
@@ -221,6 +120,56 @@ export default function PeoplePage({ navigate: _navigate }: PeoplePageProps) {
   const [newTag, setNewTag] = useState('')
   const [addingTag, setAddingTag] = useState(false)
 
+  // Real data state
+  const [peopleDB, setPeopleDB] = useState<DBPerson[]>([])
+  const [people, setPeople] = useState<Person[]>([])
+  const [relations, setRelations] = useState<Relation[]>([])
+
+  const loadGraph = useCallback(async () => {
+    try {
+      const dbP = await window.api.getPeople()
+      const dbR = await window.api.getRelations()
+      
+      setPeopleDB(dbP)
+
+      // Transform DB records into UI Person format
+      const uiPeople = dbP.map(p => {
+        const initials = p.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
+        return {
+          id: p.id,
+          name: p.name,
+          initials,
+          color: p.color,
+          tags: [], // to be populated by MapReduce later
+          messageCount: p.message_count,
+          chats: [], // to be populated by MapReduce later
+          lastSeen: 'ativo',
+          bio: p.bio || '',
+          keyMemories: [] // to be populated by MapReduce later
+        } as Person
+      })
+      
+      const uiRelations = dbR.map(r => ({
+        a: r.source_id,
+        b: r.target_id,
+        strength: r.strength
+      }))
+
+      setPeople(uiPeople)
+      setRelations(uiRelations)
+      setPositions(initPositions(uiPeople, dims.w, dims.h))
+      setSettled(false)
+    } catch (e) {
+      console.error('Failed to load people graph', e)
+    }
+  }, [dims.w, dims.h])
+
+  useEffect(() => {
+    if (dims.w > 0) {
+      loadGraph()
+    }
+  }, [dims, loadGraph])
+
   // Measure container
   useEffect(() => {
     const measure = () => {
@@ -234,14 +183,6 @@ export default function PeoplePage({ navigate: _navigate }: PeoplePageProps) {
     return () => window.removeEventListener('resize', measure)
   }, [])
 
-  // Init positions
-  useEffect(() => {
-    if (dims.w > 0) {
-      setPositions(initPositions(MOCK_PEOPLE, dims.w, dims.h))
-      setSettled(false)
-    }
-  }, [dims])
-
   // Simulate force layout
   useEffect(() => {
     if (settled || positions.length === 0) return
@@ -249,7 +190,7 @@ export default function PeoplePage({ navigate: _navigate }: PeoplePageProps) {
     const maxFrames = 120
     let current = positions
     const tick = () => {
-      current = runForce(current, MOCK_RELATIONS, dims.w, dims.h)
+      current = runForce(current, relations, dims.w, dims.h)
       setPositions([...current])
       frame++
       if (frame < maxFrames) {
@@ -264,7 +205,7 @@ export default function PeoplePage({ navigate: _navigate }: PeoplePageProps) {
   const getPos = useCallback((id: string) =>
     positions.find(p => p.id === id) ?? { x: 0, y: 0 }, [positions])
 
-  const getPerson = (id: string) => MOCK_PEOPLE.find(p => p.id === id)
+  const getPerson = (id: string) => people.find(p => p.id === id)
 
   const nodeRadius = (p: Person) => {
     const base = 22
@@ -274,6 +215,9 @@ export default function PeoplePage({ navigate: _navigate }: PeoplePageProps) {
 
   return (
     <div className="page" style={{ padding: 0, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      {/* Mention Inbox global */}
+      <MentionInbox people={peopleDB} onResolved={loadGraph} />
+
       {/* Header */}
       <div style={{
         padding: '18px 28px 14px',
@@ -290,7 +234,7 @@ export default function PeoplePage({ navigate: _navigate }: PeoplePageProps) {
             Pessoas
           </div>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginTop: '1px' }}>
-            {MOCK_PEOPLE.length} pessoas · {MOCK_RELATIONS.length} conexões · dados simulados
+            {people.length} pessoas · {relations.length} conexões
           </div>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -324,14 +268,14 @@ export default function PeoplePage({ navigate: _navigate }: PeoplePageProps) {
           >
             <defs>
               {/* Radial gradient for glow */}
-              {MOCK_PEOPLE.map(p => (
+              {people.map(p => (
                 <radialGradient key={`glow-${p.id}`} id={`glow-${p.id}`} cx="50%" cy="50%" r="50%">
                   <stop offset="0%" stopColor={p.color} stopOpacity="0.25" />
                   <stop offset="100%" stopColor={p.color} stopOpacity="0" />
                 </radialGradient>
               ))}
               {/* Edge gradient */}
-              {MOCK_RELATIONS.map((rel, i) => {
+              {relations.map((rel, i) => {
                 const pa = getPerson(rel.a)
                 const pb = getPerson(rel.b)
                 if (!pa || !pb) return null
@@ -354,7 +298,7 @@ export default function PeoplePage({ navigate: _navigate }: PeoplePageProps) {
             <rect width={dims.w} height={dims.h} fill="url(#grid)" />
 
             {/* Edges */}
-            {MOCK_RELATIONS.map((rel, i) => {
+            {relations.map((rel, i) => {
               const pa = getPos(rel.a)
               const pb = getPos(rel.b)
               const isHighlighted = hovered === rel.a || hovered === rel.b ||
@@ -374,7 +318,7 @@ export default function PeoplePage({ navigate: _navigate }: PeoplePageProps) {
             })}
 
             {/* Nodes */}
-            {MOCK_PEOPLE.map(person => {
+            {people.map(person => {
               const pos = getPos(person.id)
               if (!pos.x && !pos.y) return null
               const r = nodeRadius(person)

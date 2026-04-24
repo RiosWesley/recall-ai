@@ -91,6 +91,29 @@ contextBridge.exposeInMainWorld('api', {
     return ipcRenderer.invoke('settings:update', partial)
   },
 
+  // ── People & Mentions ───────────────────────────────────────────────────────
+  getPendingMentions(): Promise<import('../src/shared/types').PendingMention[]> {
+    return ipcRenderer.invoke('mentions:get_pending')
+  },
+
+  getPeople(): Promise<import('../src/shared/types').Person[]> {
+    return ipcRenderer.invoke('mentions:get_people')
+  },
+
+  getRelations(): Promise<import('../src/shared/types').PersonRelation[]> {
+    return ipcRenderer.invoke('mentions:get_relations')
+  },
+
+  resolveMention(mentionId: string, action: import('../src/shared/types').MentionResolutionAction, personId?: string): Promise<void> {
+    return ipcRenderer.invoke('mentions:resolve', mentionId, action, personId)
+  },
+
+  onMentionDetected(cb: (mention: import('../src/shared/types').PendingMention) => void): () => void {
+    const listener = (_event: Electron.IpcRendererEvent, mention: import('../src/shared/types').PendingMention) => cb(mention)
+    ipcRenderer.on('ingest:mention_detected', listener)
+    return () => ipcRenderer.off('ingest:mention_detected', listener)
+  },
+
   // ── Window controls ─────────────────────────────────────────────────────────
   windowMinimize(): void {
     ipcRenderer.send('window:minimize')

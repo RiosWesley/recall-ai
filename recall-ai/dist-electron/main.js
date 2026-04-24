@@ -1,17 +1,17 @@
-var Se = Object.defineProperty;
-var Ie = (n, e, t) => e in n ? Se(n, e, { enumerable: !0, configurable: !0, writable: !0, value: t }) : n[e] = t;
-var E = (n, e, t) => Ie(n, typeof e != "symbol" ? e + "" : e, t);
-import { app as O, ipcMain as f, utilityProcess as me, dialog as Ee, BrowserWindow as ue } from "electron";
-import { fileURLToPath as Q } from "node:url";
-import N, { basename as Re } from "node:path";
-import ye from "better-sqlite3";
-import { webcrypto as Z, createHash as Le } from "node:crypto";
-import ee, { createReadStream as K } from "node:fs";
-import { createInterface as pe } from "node:readline";
-import { resolveModelFile as $, createModelDownloader as Oe } from "node-llama-cpp";
-import W from "fs";
-import Ae from "path";
-const te = "001_initial", we = `
+var De = Object.defineProperty;
+var ke = (i, e, t) => e in i ? De(i, e, { enumerable: !0, configurable: !0, writable: !0, value: t }) : i[e] = t;
+var m = (i, e, t) => ke(i, typeof e != "symbol" ? e + "" : e, t);
+import { app as A, ipcMain as g, utilityProcess as fe, dialog as Ne, BrowserWindow as Ie } from "electron";
+import { fileURLToPath as ee } from "node:url";
+import I, { basename as Ce } from "node:path";
+import Fe from "better-sqlite3";
+import { webcrypto as ae, createHash as Ue } from "node:crypto";
+import re, { createReadStream as te } from "node:fs";
+import { createInterface as Se } from "node:readline";
+import { resolveModelFile as V, createModelDownloader as xe } from "node-llama-cpp";
+import j from "fs";
+import Pe from "path";
+const oe = "001_initial", Me = `
   -- ============================================================
   -- CHATS — imported WhatsApp conversations
   -- ============================================================
@@ -90,7 +90,7 @@ const te = "001_initial", we = `
   CREATE INDEX IF NOT EXISTS idx_messages_sender    ON messages(sender);
   CREATE INDEX IF NOT EXISTS idx_chunks_chat        ON chunks(chat_id);
   CREATE INDEX IF NOT EXISTS idx_chunks_time        ON chunks(start_time, end_time);
-`, De = `
+`, be = `
   -- ============================================================
   -- VECTORS — sqlite-vec KNN (created only if extension loaded)
   -- ============================================================
@@ -107,40 +107,40 @@ const te = "001_initial", we = `
     chunk_id UNINDEXED,
     tokenize='unicode61'
   );
-`, ke = `
+`, Be = `
   -- FTS5 table only (when sqlite-vec not available)
   CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
     content,
     chunk_id UNINDEXED,
     tokenize='unicode61'
   );
-`, Fe = `
+`, Xe = `
   CREATE TABLE IF NOT EXISTS _migrations (
     id TEXT PRIMARY KEY,
     applied_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
   );
 `;
-function Ue(n) {
-  if (n.exec(Fe), n.prepare(
+function ve(i) {
+  if (i.exec(Xe), i.prepare(
     "SELECT id FROM _migrations WHERE id = ?"
-  ).get(te)) {
+  ).get(oe)) {
     console.log("[DB] Migration 001_initial already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 001_initial..."), n.transaction(() => {
-    n.exec(we), Ce(n) ? (console.log("[DB] sqlite-vec detected — creating vectors + chunks_fts tables"), n.exec(De)) : (console.log("[DB] sqlite-vec not detected — creating chunks_fts only"), n.exec(ke)), n.prepare(
+  console.log("[DB] Running migration 001_initial..."), i.transaction(() => {
+    i.exec(Me), Ge(i) ? (console.log("[DB] sqlite-vec detected — creating vectors + chunks_fts tables"), i.exec(be)) : (console.log("[DB] sqlite-vec not detected — creating chunks_fts only"), i.exec(Be)), i.prepare(
       "INSERT INTO _migrations (id) VALUES (?)"
-    ).run(te);
+    ).run(oe);
   })(), console.log("[DB] Migration 001_initial complete");
 }
-function Ce(n) {
+function Ge(i) {
   try {
-    return n.prepare("SELECT vec_version()").get(), !0;
+    return i.prepare("SELECT vec_version()").get(), !0;
   } catch {
     return !1;
   }
 }
-const se = "002_add_profile_facts", xe = `
+const ce = "002_add_profile_facts", Ye = `
   -- ============================================================
   -- PROFILE FACTS — synthetic sentences about conversation patterns
   -- ============================================================
@@ -156,7 +156,7 @@ const se = "002_add_profile_facts", xe = `
 
   -- Index to speed up retrieval by contact
   CREATE INDEX IF NOT EXISTS idx_profile_facts_contact ON profile_facts(contact_id);
-`, Pe = `
+`, ze = `
   -- FTS5 table for profile_facts mapping rowid to id
   CREATE VIRTUAL TABLE IF NOT EXISTS profile_facts_fts USING fts5(
     text,
@@ -174,7 +174,7 @@ const se = "002_add_profile_facts", xe = `
   BEGIN
     DELETE FROM profile_facts_fts WHERE fact_id = old.id;
   END;
-`, Me = `
+`, qe = `
   -- SQLite-vec table for semantic search on profile_facts
   -- Use vec0 for dynamic loading
   CREATE VIRTUAL TABLE IF NOT EXISTS profile_facts_vectors USING vec0(
@@ -182,27 +182,27 @@ const se = "002_add_profile_facts", xe = `
     embedding FLOAT[768]
   );
 `;
-function be(n) {
-  if (n.prepare(
+function $e(i) {
+  if (i.prepare(
     "SELECT id FROM _migrations WHERE id = ?"
-  ).get(se)) {
+  ).get(ce)) {
     console.log("[DB] Migration 002_add_profile_facts already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 002_add_profile_facts..."), n.transaction(() => {
-    n.exec(xe), n.exec(Pe), ve(n) && (console.log("[DB] sqlite-vec detected — creating profile_facts_vectors table"), n.exec(Me)), n.prepare(
+  console.log("[DB] Running migration 002_add_profile_facts..."), i.transaction(() => {
+    i.exec(Ye), i.exec(ze), We(i) && (console.log("[DB] sqlite-vec detected — creating profile_facts_vectors table"), i.exec(qe)), i.prepare(
       "INSERT INTO _migrations (id) VALUES (?)"
-    ).run(se);
+    ).run(ce);
   })(), console.log("[DB] Migration 002_add_profile_facts complete");
 }
-function ve(n) {
+function We(i) {
   try {
-    return n.prepare("SELECT vec_version()").get(), !0;
+    return i.prepare("SELECT vec_version()").get(), !0;
   } catch {
     return !1;
   }
 }
-const ne = "003_add_contact_profiles", Be = `
+const de = "003_add_contact_profiles", He = `
   -- ============================================================
   -- CONTACT PROFILES — Generated by LLM Map-Reduce pipeline
   -- ============================================================
@@ -241,20 +241,20 @@ const ne = "003_add_contact_profiles", Be = `
 
   CREATE INDEX IF NOT EXISTS idx_block_summaries_contact ON block_summaries(contact_id);
 `;
-function Xe(n) {
-  if (n.prepare(
+function Ve(i) {
+  if (i.prepare(
     "SELECT id FROM _migrations WHERE id = ?"
-  ).get(ne)) {
+  ).get(de)) {
     console.log("[DB] Migration 003_add_contact_profiles already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 003_add_contact_profiles..."), n.transaction(() => {
-    n.exec(Be), n.prepare(
+  console.log("[DB] Running migration 003_add_contact_profiles..."), i.transaction(() => {
+    i.exec(He), i.prepare(
       "INSERT INTO _migrations (id) VALUES (?)"
-    ).run(ne);
+    ).run(de);
   })(), console.log("[DB] Migration 003_add_contact_profiles complete");
 }
-const ae = "004_parent_child_chunks", Ge = `
+const le = "004_parent_child_chunks", je = `
   -- ============================================================
   -- PARENT CHUNKS — contexto completo retornado ao LLM
   -- ============================================================
@@ -290,7 +290,7 @@ const ae = "004_parent_child_chunks", Ge = `
   CREATE INDEX IF NOT EXISTS idx_parent_chunks_chat ON parent_chunks(chat_id);
   CREATE INDEX IF NOT EXISTS idx_child_chunks_parent ON child_chunks(parent_id);
   CREATE INDEX IF NOT EXISTS idx_child_chunks_time ON child_chunks(start_time, end_time);
-`, ze = `
+`, Qe = `
   -- ============================================================
   -- VECTORS — child embeddings via sqlite-vec
   -- ============================================================
@@ -307,30 +307,30 @@ const ae = "004_parent_child_chunks", Ge = `
     chunk_id UNINDEXED,
     tokenize='unicode61'
   );
-`, Ye = `
+`, Ke = `
   CREATE VIRTUAL TABLE IF NOT EXISTS child_chunks_fts USING fts5(
     content,
     chunk_id UNINDEXED,
     tokenize='unicode61'
   );
 `;
-function $e(n) {
-  if (n.prepare("SELECT id FROM _migrations WHERE id = ?").get(ae)) {
+function Je(i) {
+  if (i.prepare("SELECT id FROM _migrations WHERE id = ?").get(le)) {
     console.log("[DB] Migration 004_parent_child_chunks already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 004_parent_child_chunks..."), n.transaction(() => {
-    n.exec(Ge), We(n) ? (console.log("[DB] sqlite-vec detected — creating child_vectors + child_chunks_fts tables"), n.exec(ze)) : (console.log("[DB] sqlite-vec not detected — creating child_chunks_fts only"), n.exec(Ye)), n.prepare("INSERT INTO _migrations (id) VALUES (?)").run(ae);
+  console.log("[DB] Running migration 004_parent_child_chunks..."), i.transaction(() => {
+    i.exec(je), Ze(i) ? (console.log("[DB] sqlite-vec detected — creating child_vectors + child_chunks_fts tables"), i.exec(Qe)) : (console.log("[DB] sqlite-vec not detected — creating child_chunks_fts only"), i.exec(Ke)), i.prepare("INSERT INTO _migrations (id) VALUES (?)").run(le);
   })(), console.log("[DB] Migration 004_parent_child_chunks complete");
 }
-function We(n) {
+function Ze(i) {
   try {
-    return n.prepare("SELECT vec_version()").get(), !0;
+    return i.prepare("SELECT vec_version()").get(), !0;
   } catch {
     return !1;
   }
 }
-const ie = "005_propositions", qe = `
+const Ee = "005_propositions", et = `
   -- ============================================================
   -- PROPOSITIONS — extracted facts from parent chunks
   -- ============================================================
@@ -348,7 +348,7 @@ const ie = "005_propositions", qe = `
 
   CREATE INDEX IF NOT EXISTS idx_propositions_chat ON propositions(chat_id);
   CREATE INDEX IF NOT EXISTS idx_propositions_parent ON propositions(parent_chunk_id);
-`, He = `
+`, tt = `
   -- ============================================================
   -- VECTORS — propositions embeddings via sqlite-vec
   -- ============================================================
@@ -366,7 +366,7 @@ const ie = "005_propositions", qe = `
     proposition_id UNINDEXED,
     tokenize='unicode61 remove_diacritics 2'
   );
-`, Ve = `
+`, st = `
   CREATE VIRTUAL TABLE IF NOT EXISTS propositions_fts USING fts5(
     fact,
     original_quote,
@@ -374,23 +374,23 @@ const ie = "005_propositions", qe = `
     tokenize='unicode61 remove_diacritics 2'
   );
 `;
-function je(n) {
-  if (n.prepare("SELECT id FROM _migrations WHERE id = ?").get(ie)) {
+function nt(i) {
+  if (i.prepare("SELECT id FROM _migrations WHERE id = ?").get(Ee)) {
     console.log("[DB] Migration 005_propositions already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 005_propositions..."), n.transaction(() => {
-    n.exec(qe), Qe(n) ? (console.log("[DB] sqlite-vec detected — creating proposition_vectors + propositions_fts tables"), n.exec(He)) : (console.log("[DB] sqlite-vec not detected — creating propositions_fts only"), n.exec(Ve)), n.prepare("INSERT INTO _migrations (id) VALUES (?)").run(ie);
+  console.log("[DB] Running migration 005_propositions..."), i.transaction(() => {
+    i.exec(et), it(i) ? (console.log("[DB] sqlite-vec detected — creating proposition_vectors + propositions_fts tables"), i.exec(tt)) : (console.log("[DB] sqlite-vec not detected — creating propositions_fts only"), i.exec(st)), i.prepare("INSERT INTO _migrations (id) VALUES (?)").run(Ee);
   })(), console.log("[DB] Migration 005_propositions complete");
 }
-function Qe(n) {
+function it(i) {
   try {
-    return n.prepare("SELECT vec_version()").get(), !0;
+    return i.prepare("SELECT vec_version()").get(), !0;
   } catch {
     return !1;
   }
 }
-const re = "006_intelligent_ingestion", Ke = `
+const me = "006_intelligent_ingestion", at = `
   -- We drop vector and chunks tables since we are moving away from vector embeddings and strict token chunks
   DROP TABLE IF EXISTS proposition_vectors;
   DROP TABLE IF EXISTS fact_vectors;
@@ -454,16 +454,16 @@ const re = "006_intelligent_ingestion", Ke = `
   CREATE INDEX IF NOT EXISTS idx_sessions_time ON sessions(start_time, end_time);
   CREATE INDEX IF NOT EXISTS idx_entities_session ON entities(session_id);
 `;
-function Je(n) {
-  if (n.prepare("SELECT id FROM _migrations WHERE id = ?").get(re)) {
+function rt(i) {
+  if (i.prepare("SELECT id FROM _migrations WHERE id = ?").get(me)) {
     console.log("[DB] Migration 006_intelligent_ingestion already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 006_intelligent_ingestion..."), n.transaction(() => {
-    n.exec(Ke), n.prepare("INSERT INTO _migrations (id) VALUES (?)").run(re);
+  console.log("[DB] Running migration 006_intelligent_ingestion..."), i.transaction(() => {
+    i.exec(at), i.prepare("INSERT INTO _migrations (id) VALUES (?)").run(me);
   })(), console.log("[DB] Migration 006_intelligent_ingestion complete");
 }
-const oe = "007_search_indexes", Ze = `
+const pe = "007_search_indexes", ot = `
   -- Cria VIRTUAL TABLE para permitir busca rapida FTS5 nas mensagens individuais
   CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     sender,
@@ -494,55 +494,128 @@ const oe = "007_search_indexes", Ze = `
     VALUES (new.sender, new.content, new.id);
   END;
 `;
-function et(n) {
-  if (n.prepare("SELECT id FROM _migrations WHERE id = ?").get(oe)) {
+function ct(i) {
+  if (i.prepare("SELECT id FROM _migrations WHERE id = ?").get(pe)) {
     console.log("[DB] Migration 007_search_indexes already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 007_search_indexes..."), n.transaction(() => {
-    n.exec(Ze), n.prepare("INSERT INTO _migrations (id) VALUES (?)").run(oe);
+  console.log("[DB] Running migration 007_search_indexes..."), i.transaction(() => {
+    i.exec(ot), i.prepare("INSERT INTO _migrations (id) VALUES (?)").run(pe);
   })(), console.log("[DB] Migration 007_search_indexes complete");
 }
-const S = class S {
+const ue = "008_people_schema", dt = `
+  -- ============================================================
+  -- PEOPLE — The root nodes for the Identity Graph
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS people (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL,
+    bio TEXT,
+    message_count INTEGER DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+    last_seen INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+  );
+
+  -- ============================================================
+  -- PERSON_ALIASES — Used for resolving names to specific people
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS person_aliases (
+    person_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    alias TEXT NOT NULL,
+    PRIMARY KEY (person_id, alias)
+  );
+  
+  -- Create FTS5 for quick alias matching during mention resolution
+  CREATE VIRTUAL TABLE IF NOT EXISTS person_aliases_fts USING fts5(
+    alias,
+    person_id UNINDEXED,
+    tokenize='unicode61'
+  );
+
+  -- Trigger to keep FTS updated
+  CREATE TRIGGER IF NOT EXISTS person_aliases_ai AFTER INSERT ON person_aliases BEGIN
+    INSERT INTO person_aliases_fts(alias, person_id) VALUES (new.alias, new.person_id);
+  END;
+  CREATE TRIGGER IF NOT EXISTS person_aliases_ad AFTER DELETE ON person_aliases BEGIN
+    INSERT INTO person_aliases_fts(person_aliases_fts, alias, person_id) VALUES('delete', old.alias, old.person_id);
+  END;
+
+  -- ============================================================
+  -- PERSON_RELATIONS — Edges of the Identity Graph
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS person_relations (
+    source_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    target_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    relation_type TEXT,
+    strength REAL DEFAULT 0.5,
+    PRIMARY KEY (source_id, target_id)
+  );
+
+  -- ============================================================
+  -- PERSON_MENTIONS — Bridge between a chat session and a person
+  -- ============================================================
+  CREATE TABLE IF NOT EXISTS person_mentions (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    person_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    context TEXT,
+    PRIMARY KEY (session_id, person_id)
+  );
+
+  -- Indexes for performance
+  CREATE INDEX IF NOT EXISTS idx_person_mentions_person ON person_mentions(person_id);
+  CREATE INDEX IF NOT EXISTS idx_person_mentions_session ON person_mentions(session_id);
+  CREATE INDEX IF NOT EXISTS idx_person_relations_target ON person_relations(target_id);
+`;
+function lt(i) {
+  if (i.prepare("SELECT id FROM _migrations WHERE id = ?").get(ue)) {
+    console.log("[DB] Migration 008_people_schema already applied — skipping");
+    return;
+  }
+  console.log("[DB] Running migration 008_people_schema..."), i.transaction(() => {
+    i.exec(dt), i.prepare("INSERT INTO _migrations (id) VALUES (?)").run(ue);
+  })(), console.log("[DB] Migration 008_people_schema complete");
+}
+const R = class R {
   static getInstance() {
-    if (S.db)
-      return S.db;
-    const e = O.getPath("userData"), t = N.join(e, "recall-ai.db");
+    if (R.db)
+      return R.db;
+    const e = A.getPath("userData"), t = I.join(e, "recall-ai.db");
     console.log("[DB] Opening database at:", t);
-    const s = new ye(t, {
+    const s = new Fe(t, {
       verbose: process.env.NODE_ENV === "development" ? console.log : void 0
     });
-    return s.pragma("journal_mode = WAL"), s.pragma("foreign_keys = ON"), s.pragma("synchronous = NORMAL"), s.pragma("cache_size = -32000"), s.pragma("temp_store = MEMORY"), S.db = s, Ue(s), be(s), Xe(s), $e(s), je(s), Je(s), et(s), console.log("[DB] Database ready"), s;
+    return s.pragma("journal_mode = WAL"), s.pragma("foreign_keys = ON"), s.pragma("synchronous = NORMAL"), s.pragma("cache_size = -32000"), s.pragma("temp_store = MEMORY"), R.db = s, ve(s), $e(s), Ve(s), Je(s), nt(s), rt(s), ct(s), lt(s), console.log("[DB] Database ready"), s;
   }
   /** Close the database connection (call on app quit) */
   static close() {
-    S.db && (S.db.close(), S.db = null, console.log("[DB] Database closed"));
+    R.db && (R.db.close(), R.db = null, console.log("[DB] Database closed"));
   }
   /** Check if the database is open */
   static isOpen() {
-    return S.db !== null && S.db.open;
+    return R.db !== null && R.db.open;
   }
 };
-E(S, "db", null);
-let R = S, tt = "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
-const st = 128;
-let w, M;
-function nt(n) {
-  !w || w.length < n ? (w = Buffer.allocUnsafe(n * st), Z.getRandomValues(w), M = 0) : M + n > w.length && (Z.getRandomValues(w), M = 0), M += n;
+m(R, "db", null);
+let N = R, Et = "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
+const mt = 128;
+let y, b;
+function pt(i) {
+  !y || y.length < i ? (y = Buffer.allocUnsafe(i * mt), ae.getRandomValues(y), b = 0) : b + i > y.length && (ae.getRandomValues(y), b = 0), b += i;
 }
-function _(n = 21) {
-  nt(n |= 0);
+function f(i = 21) {
+  pt(i |= 0);
   let e = "";
-  for (let t = M - n; t < M; t++)
-    e += tt[w[t] & 63];
+  for (let t = b - i; t < b; t++)
+    e += Et[y[t] & 63];
   return e;
 }
-class b {
+class B {
   constructor(e) {
     this.db = e;
   }
   create(e) {
-    const t = e.id ?? _(), s = Math.floor(Date.now() / 1e3);
+    const t = e.id ?? f(), s = Math.floor(Date.now() / 1e3);
     return this.db.prepare(`
       INSERT INTO chats (
         id, name, source, participant_count, message_count,
@@ -567,13 +640,13 @@ class b {
   findAll() {
     return this.db.prepare(
       "SELECT * FROM chats ORDER BY imported_at DESC"
-    ).all().map(ce);
+    ).all().map(Te);
   }
   findById(e) {
     const t = this.db.prepare(
       "SELECT * FROM chats WHERE id = ?"
     ).get(e);
-    return t ? ce(t) : null;
+    return t ? Te(t) : null;
   }
   delete(e) {
     this.db.prepare("DELETE FROM chats WHERE id = ?").run(e);
@@ -599,13 +672,13 @@ class b {
     ).run(t, s, e);
   }
 }
-function ce(n) {
+function Te(i) {
   return {
-    ...n,
-    metadata: n.metadata ? JSON.parse(n.metadata) : null
+    ...i,
+    metadata: i.metadata ? JSON.parse(i.metadata) : null
   };
 }
-class J {
+class se {
   constructor(e) {
     this.db = e;
   }
@@ -619,10 +692,10 @@ class J {
       INSERT OR IGNORE INTO messages (id, chat_id, sender, content, timestamp, type, raw)
       VALUES (@id, @chat_id, @sender, @content, @timestamp, @type, @raw)
     `);
-    this.db.transaction((a) => {
-      for (const r of a)
+    this.db.transaction((n) => {
+      for (const r of n)
         t.run({
-          id: r.id ?? _(),
+          id: r.id ?? f(),
           chat_id: r.chat_id,
           sender: r.sender,
           content: r.content,
@@ -666,16 +739,16 @@ class J {
    */
   searchFactual(e, t = 15, s = 5) {
     if (!e || e.length === 0) return [];
-    const a = e.map((c) => c.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, "").trim()).filter(Boolean);
-    if (a.length === 0) return [];
-    const r = a.map((c) => `"${c}"*`).join(" OR "), i = this.db.prepare(`
+    const n = e.map((c) => c.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, "").trim()).filter(Boolean);
+    if (n.length === 0) return [];
+    const r = n.map((c) => `"${c}"*`).join(" OR "), a = this.db.prepare(`
       SELECT m.id, m.chat_id, m.timestamp 
       FROM messages_fts fts
       JOIN messages m ON fts.message_id = m.id
       WHERE messages_fts MATCH ?
       ORDER BY fts.rank
       LIMIT ?
-    `).all(r, s), o = [], d = this.db.prepare(`
+    `).all(r, s), o = [], l = this.db.prepare(`
       SELECT * FROM (
         SELECT * FROM messages 
         WHERE chat_id = ? AND timestamp <= ? 
@@ -689,8 +762,8 @@ class J {
       )
       ORDER BY timestamp ASC
     `);
-    for (const c of i) {
-      const l = d.all(
+    for (const c of a) {
+      const d = l.all(
         c.chat_id,
         c.timestamp,
         t + 1,
@@ -698,12 +771,12 @@ class J {
         c.timestamp,
         t + 1
       );
-      o.push(l);
+      o.push(d);
     }
     return o;
   }
 }
-class G {
+class z {
   constructor(e) {
     this.db = e;
   }
@@ -718,7 +791,7 @@ class G {
       ) VALUES (
         @id, @chat_id, @start_time, @end_time, @message_count, @summary
       )
-    `), a = this.db.prepare(`
+    `), n = this.db.prepare(`
       INSERT INTO sessions_fts (summary, session_id)
       VALUES (@summary, @session_id)
     `), r = this.db.prepare(`
@@ -727,36 +800,36 @@ class G {
       ) VALUES (
         @id, @session_id, @name, @normalized_name, @type, @action
       )
-    `), i = this.db.prepare(`
+    `), a = this.db.prepare(`
       INSERT INTO entities_fts (normalized_name, type, action, entity_id)
       VALUES (@normalized_name, @type, @action, @entity_id)
     `);
-    this.db.transaction((d, c) => {
-      for (const l of d) {
-        const m = l.id ?? _();
+    this.db.transaction((l, c) => {
+      for (const d of l) {
+        const E = d.id ?? f();
         s.run({
-          id: m,
-          chat_id: l.chat_id,
-          start_time: l.start_time,
-          end_time: l.end_time,
-          message_count: l.message_count ?? 0,
-          summary: l.summary
-        }), a.run({ summary: l.summary, session_id: m });
+          id: E,
+          chat_id: d.chat_id,
+          start_time: d.start_time,
+          end_time: d.end_time,
+          message_count: d.message_count ?? 0,
+          summary: d.summary
+        }), n.run({ summary: d.summary, session_id: E });
       }
-      for (const l of c) {
-        const m = l.id ?? _();
+      for (const d of c) {
+        const E = d.id ?? f();
         r.run({
-          id: m,
-          session_id: l.session_id,
-          name: l.name,
-          normalized_name: l.normalized_name,
-          type: l.type,
-          action: l.action
-        }), i.run({
-          normalized_name: l.normalized_name,
-          type: l.type,
-          action: l.action,
-          entity_id: m
+          id: E,
+          session_id: d.session_id,
+          name: d.name,
+          normalized_name: d.normalized_name,
+          type: d.type,
+          action: d.action
+        }), a.run({
+          normalized_name: d.normalized_name,
+          type: d.type,
+          action: d.action,
+          entity_id: E
         });
       }
     })(e, t);
@@ -766,11 +839,11 @@ class G {
    * Used by the background NLP worker.
    */
   updateSessionNLP(e, t, s) {
-    const a = this.db.prepare(`
+    const n = this.db.prepare(`
       UPDATE sessions SET summary = @summary WHERE id = @id
     `), r = this.db.prepare(`
       UPDATE sessions_fts SET summary = @summary WHERE session_id = @id
-    `), i = this.db.prepare(`
+    `), a = this.db.prepare(`
       INSERT INTO entities (
         id, session_id, name, normalized_name, type, action
       ) VALUES (
@@ -781,11 +854,11 @@ class G {
       VALUES (@normalized_name, @type, @action, @entity_id)
     `);
     this.db.transaction(() => {
-      a.run({ summary: t, id: e }), r.run({ summary: t, id: e });
+      n.run({ summary: t, id: e }), r.run({ summary: t, id: e });
       for (const c of s) {
-        const l = c.id ?? _();
-        i.run({
-          id: l,
+        const d = c.id ?? f();
+        a.run({
+          id: d,
           session_id: c.session_id,
           name: c.name,
           normalized_name: c.normalized_name,
@@ -795,7 +868,7 @@ class G {
           normalized_name: c.normalized_name,
           type: c.type,
           action: c.action,
-          entity_id: l
+          entity_id: d
         });
       }
     })();
@@ -826,12 +899,12 @@ class G {
     ).all(e);
     if (t.length === 0)
       return;
-    const s = this.db.prepare("DELETE FROM sessions WHERE chat_id = ?"), a = this.db.prepare("DELETE FROM sessions_fts WHERE session_id = ?"), r = this.db.prepare(
+    const s = this.db.prepare("DELETE FROM sessions WHERE chat_id = ?"), n = this.db.prepare("DELETE FROM sessions_fts WHERE session_id = ?"), r = this.db.prepare(
       "DELETE FROM entities_fts WHERE entity_id IN (SELECT id FROM entities WHERE session_id = ?)"
     );
     this.db.transaction(() => {
       for (const { id: o } of t)
-        r.run(o), a.run(o);
+        r.run(o), n.run(o);
       s.run(e);
     })();
   }
@@ -843,28 +916,28 @@ class G {
   searchNarrative(e, t = 5, s) {
     if (!e || e.length === 0) return [];
     if (e.includes("#RECENT#")) {
-      let d = "SELECT * FROM sessions";
-      const c = [], l = [];
-      return s != null && s.dateFrom && (l.push("start_time >= ?"), c.push(s.dateFrom)), s != null && s.dateTo && (l.push("end_time <= ?"), c.push(s.dateTo)), l.length > 0 && (d += " WHERE " + l.join(" AND ")), d += " ORDER BY start_time DESC LIMIT ?", c.push(t), this.db.prepare(d).all(...c).reverse();
+      let l = "SELECT * FROM sessions";
+      const c = [], d = [];
+      return s != null && s.dateFrom && (d.push("start_time >= ?"), c.push(s.dateFrom)), s != null && s.dateTo && (d.push("end_time <= ?"), c.push(s.dateTo)), d.length > 0 && (l += " WHERE " + d.join(" AND ")), l += " ORDER BY start_time DESC LIMIT ?", c.push(t), this.db.prepare(l).all(...c).reverse();
     }
-    const a = e.map((d) => d.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ]/g, "").trim()).filter(Boolean);
-    if (a.length === 0) return [];
-    const r = a.map((d) => `"${d}"*`).join(" OR ");
-    let i = `
+    const n = e.map((l) => l.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ]/g, "").trim()).filter(Boolean);
+    if (n.length === 0) return [];
+    const r = n.map((l) => `"${l}"*`).join(" OR ");
+    let a = `
       SELECT s.*
       FROM sessions_fts fts
       JOIN sessions s ON fts.session_id = s.id
       WHERE sessions_fts MATCH ?
     `;
     const o = [r];
-    return s != null && s.dateFrom && (i += " AND s.start_time >= ?", o.push(s.dateFrom)), s != null && s.dateTo && (i += " AND s.end_time <= ?", o.push(s.dateTo)), i += " ORDER BY fts.rank LIMIT ?", o.push(t), this.db.prepare(i).all(...o);
+    return s != null && s.dateFrom && (a += " AND s.start_time >= ?", o.push(s.dateFrom)), s != null && s.dateTo && (a += " AND s.end_time <= ?", o.push(s.dateTo)), a += " ORDER BY fts.rank LIMIT ?", o.push(t), this.db.prepare(a).all(...o);
   }
   searchAggregation(e, t = 10, s) {
     if (!e || e.length === 0) return [];
-    const a = e.map((d) => d.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, "").trim()).filter(Boolean);
-    if (a.length === 0) return [];
-    const r = a.map((d) => `"${d}"*`).join(" OR ");
-    let i = `
+    const n = e.map((l) => l.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, "").trim()).filter(Boolean);
+    if (n.length === 0) return [];
+    const r = n.map((l) => `"${l}"*`).join(" OR ");
+    let a = `
       SELECT e.normalized_name as name, e.type, COUNT(*) as count
       FROM entities_fts fts
       JOIN entities e ON fts.entity_id = e.id
@@ -872,22 +945,82 @@ class G {
       WHERE entities_fts MATCH ?
     `;
     const o = [r];
-    return s != null && s.dateFrom && (i += " AND s.start_time >= ?", o.push(s.dateFrom)), s != null && s.dateTo && (i += " AND s.end_time <= ?", o.push(s.dateTo)), i += " GROUP BY e.normalized_name, e.type ORDER BY count DESC LIMIT ?", o.push(t), this.db.prepare(i).all(...o);
+    return s != null && s.dateFrom && (a += " AND s.start_time >= ?", o.push(s.dateFrom)), s != null && s.dateTo && (a += " AND s.end_time <= ?", o.push(s.dateTo)), a += " GROUP BY e.normalized_name, e.type ORDER BY count DESC LIMIT ?", o.push(t), this.db.prepare(a).all(...o);
   }
 }
-function at() {
-  f.handle("chats:list", async () => {
-    const n = R.getInstance();
-    return new b(n).findAll();
-  }), f.handle("chats:delete", async (n, e) => {
-    const t = R.getInstance();
+function ut() {
+  g.handle("chats:list", async () => {
+    const i = N.getInstance();
+    return new B(i).findAll();
+  }), g.handle("chats:delete", async (i, e) => {
+    const t = N.getInstance();
     t.transaction(() => {
-      const a = new J(t), r = new G(t), i = new b(t);
-      r.deleteByChatId(e), a.deleteByChatId(e), i.delete(e);
+      const n = new se(t), r = new z(t), a = new B(t);
+      r.deleteByChatId(e), n.deleteByChatId(e), a.delete(e);
     })();
   });
 }
-const it = {
+class Y {
+  constructor(e) {
+    this.db = e;
+  }
+  /**
+   * Creates a new person and associates their first alias.
+   * Returns the newly created person ID.
+   */
+  createPersonWithAlias(e, t, s) {
+    const n = f(), r = this.db.prepare(`
+      INSERT INTO people (id, name, color) VALUES (@id, @name, @color)
+    `), a = this.db.prepare(`
+      INSERT INTO person_aliases (person_id, alias) VALUES (@person_id, @alias)
+    `);
+    return this.db.transaction(() => {
+      r.run({ id: n, name: e, color: s }), a.run({ person_id: n, alias: t });
+    })(), n;
+  }
+  /**
+   * Links a person to a session as a mention.
+   */
+  linkMention(e, t, s) {
+    this.db.prepare(`
+      INSERT OR IGNORE INTO person_mentions (session_id, person_id, context)
+      VALUES (@session_id, @person_id, @context)
+    `).run({ session_id: e, person_id: t, context: s });
+  }
+  /**
+   * Searches for a person by matching an alias using FTS5.
+   */
+  findProbableMatch(e) {
+    const t = e.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, "").trim();
+    if (!t) return [];
+    const s = `
+      SELECT p.*
+      FROM person_aliases_fts fts
+      JOIN person_aliases pa ON fts.person_id = pa.person_id AND fts.alias = pa.alias
+      JOIN people p ON pa.person_id = p.id
+      WHERE person_aliases_fts MATCH ?
+      ORDER BY fts.rank LIMIT 5
+    `, n = `"${t}"*`;
+    return this.db.prepare(s).all(n);
+  }
+  /**
+   * Returns all person relations.
+   */
+  findAllRelations() {
+    return this.db.prepare(`
+      SELECT * FROM person_relations
+    `).all();
+  }
+  /**
+   * Returns all people ordered by mention count and recency.
+   */
+  findAll() {
+    return this.db.prepare(`
+      SELECT * FROM people ORDER BY message_count DESC, last_seen DESC
+    `).all();
+  }
+}
+const Tt = {
   id: "android_br",
   regex: /^(\d{2}\/\d{2}\/\d{4}) (\d{2}:\d{2}) - ([^:]+): (.*)$/,
   format: {
@@ -900,7 +1033,7 @@ const it = {
     hasBrackets: !1
   },
   groups: { date: 1, time: 2, sender: 3, content: 4 }
-}, rt = {
+}, ht = {
   id: "android_br_comma",
   regex: /^(\d{2}\/\d{2}\/\d{4}), (\d{2}:\d{2}) - ([^:]+): (.*)$/,
   format: {
@@ -913,7 +1046,7 @@ const it = {
     hasBrackets: !1
   },
   groups: { date: 1, time: 2, sender: 3, content: 4 }
-}, ot = {
+}, gt = {
   id: "android_en",
   regex: /^(\d{1,2}\/\d{1,2}\/\d{2,4}), (\d{1,2}:\d{2} [AP]M) - ([^:]+): (.*)$/,
   format: {
@@ -926,7 +1059,7 @@ const it = {
     hasBrackets: !1
   },
   groups: { date: 1, time: 2, sender: 3, content: 4 }
-}, ct = {
+}, _t = {
   id: "ios_en",
   regex: /^\[(\d{1,2}\/\d{1,2}\/\d{2,4}), (\d{1,2}:\d{2}:\d{2} [AP]M)\] ([^:]+): (.*)$/,
   format: {
@@ -939,12 +1072,12 @@ const it = {
     hasBrackets: !0
   },
   groups: { date: 1, time: 2, sender: 3, content: 4 }
-}, H = [
-  it,
-  rt,
-  ot,
-  ct
-], dt = [
+}, K = [
+  Tt,
+  ht,
+  gt,
+  _t
+], ft = [
   /criptografia de ponta/i,
   /end-to-end encrypted/i,
   /adicionou/i,
@@ -965,7 +1098,7 @@ const it = {
   /removed\s+\+?\d/i,
   /security code changed/i,
   /código de segurança mudou/i
-], lt = [
+], Nt = [
   /<Mídia oculta>/i,
   /<Media omitted>/i,
   /\.(jpg|jpeg|png|gif|webp|mp4|opus|ogg|pdf|docx?)\s*\(arquivo anexado\)/i,
@@ -977,147 +1110,147 @@ const it = {
   /sticker omitted/i,
   /document omitted/i,
   /GIF omitted/i
-], mt = 20;
-async function Et(n) {
-  const e = await Tt(n, mt);
-  return ut(e);
+], It = 20;
+async function St(i) {
+  const e = await Ot(i, It);
+  return Rt(e);
 }
-function ut(n) {
-  for (const e of n) {
+function Rt(i) {
+  for (const e of i) {
     const t = e.trim();
     if (t) {
-      for (const s of H)
+      for (const s of K)
         if (s.regex.test(t))
           return s.format;
     }
   }
   throw new Error(
-    `WhatsApp format not recognized. Tried ${H.length} patterns on ${n.length} sample lines.`
+    `WhatsApp format not recognized. Tried ${K.length} patterns on ${i.length} sample lines.`
   );
 }
-function pt(n) {
-  const e = H.find((t) => t.id === n);
+function Lt(i) {
+  const e = K.find((t) => t.id === i);
   if (!e)
-    throw new Error(`No pattern registered for format ID: ${n}`);
+    throw new Error(`No pattern registered for format ID: ${i}`);
   return e;
 }
-async function Tt(n, e) {
-  const t = [], s = pe({
-    input: K(n, { encoding: "utf-8" }),
+async function Ot(i, e) {
+  const t = [], s = Se({
+    input: te(i, { encoding: "utf-8" }),
     crlfDelay: 1 / 0
   });
-  for await (const a of s)
-    if (t.push(a), t.length >= e) {
+  for await (const n of s)
+    if (t.push(n), t.length >= e) {
       s.close();
       break;
     }
   return t;
 }
-class ht {
+class At {
   /**
    * Parse a WhatsApp export .txt file using streaming (memory-efficient).
    */
   async parse(e) {
     let t;
     try {
-      t = await Et(e);
-    } catch (m) {
+      t = await St(e);
+    } catch (E) {
       throw new Error(
-        `Failed to detect WhatsApp format: ${m instanceof Error ? m.message : String(m)}`
+        `Failed to detect WhatsApp format: ${E instanceof Error ? E.message : String(E)}`
       );
     }
-    const s = pt(t.id), a = [], r = [];
-    let i = null, o = 0;
-    const d = pe({
-      input: K(e, { encoding: "utf-8" }),
+    const s = Lt(t.id), n = [], r = [];
+    let a = null, o = 0;
+    const l = Se({
+      input: te(e, { encoding: "utf-8" }),
       crlfDelay: 1 / 0
     });
-    for await (const m of d) {
+    for await (const E of l) {
       o++;
-      const p = o === 1 ? m.replace(/^\uFEFF/, "") : m, g = s.regex.exec(p);
-      if (g) {
-        i && de(i) && a.push(le(i));
-        const I = g[s.groups.date], T = g[s.groups.time];
-        let y;
+      const p = o === 1 ? E.replace(/^\uFEFF/, "") : E, _ = s.regex.exec(p);
+      if (_) {
+        a && he(a) && n.push(ge(a));
+        const S = _[s.groups.date], h = _[s.groups.time];
+        let L;
         try {
-          y = gt(I, T, t);
+          L = yt(S, h, t);
         } catch {
-          r.push({ line: o, content: p, reason: "invalid_timestamp" }), i = null;
+          r.push({ line: o, content: p, reason: "invalid_timestamp" }), a = null;
           continue;
         }
-        const L = g[s.groups.content] ?? "", A = g[s.groups.sender].trim();
-        i = {
-          timestamp: y,
-          sender: A,
-          content: L,
-          type: Te(L, A),
+        const O = _[s.groups.content] ?? "", M = _[s.groups.sender].trim();
+        a = {
+          timestamp: L,
+          sender: M,
+          content: O,
+          type: Re(O, M),
           raw: p,
           lineNumber: o
         };
-      } else i && p.trim() ? (i.content = (i.content ?? "") + `
-` + p, i.raw = (i.raw ?? "") + `
-` + p) : p.trim() && !i && r.push({ line: o, content: p, reason: "orphan_line" });
+      } else a && p.trim() ? (a.content = (a.content ?? "") + `
+` + p, a.raw = (a.raw ?? "") + `
+` + p) : p.trim() && !a && r.push({ line: o, content: p, reason: "orphan_line" });
     }
-    i && de(i) && a.push(le(i));
-    const c = [...new Set(a.map((m) => m.sender))], l = {
+    a && he(a) && n.push(ge(a));
+    const c = [...new Set(n.map((E) => E.sender))], d = {
       totalLines: o,
-      totalMessages: a.length,
+      totalMessages: n.length,
       errorCount: r.length,
       participants: c,
-      firstTimestamp: a.length > 0 ? a[0].timestamp : null,
-      lastTimestamp: a.length > 0 ? a[a.length - 1].timestamp : null
+      firstTimestamp: n.length > 0 ? n[0].timestamp : null,
+      lastTimestamp: n.length > 0 ? n[n.length - 1].timestamp : null
     };
-    return { messages: a, format: t, errors: r, stats: l };
+    return { messages: n, format: t, errors: r, stats: d };
   }
 }
-function de(n) {
-  return n.timestamp !== void 0 && n.sender !== void 0 && n.content !== void 0 && n.type !== void 0 && n.raw !== void 0 && n.lineNumber !== void 0;
+function he(i) {
+  return i.timestamp !== void 0 && i.sender !== void 0 && i.content !== void 0 && i.type !== void 0 && i.raw !== void 0 && i.lineNumber !== void 0;
 }
-function le(n) {
+function ge(i) {
   return {
-    timestamp: n.timestamp,
-    sender: n.sender,
-    content: n.content.trim(),
-    type: Te(n.content.trim(), n.sender),
-    raw: n.raw,
-    lineNumber: n.lineNumber
+    timestamp: i.timestamp,
+    sender: i.sender,
+    content: i.content.trim(),
+    type: Re(i.content.trim(), i.sender),
+    raw: i.raw,
+    lineNumber: i.lineNumber
   };
 }
-function Te(n, e) {
-  const t = n.trim();
-  for (const s of lt)
+function Re(i, e) {
+  const t = i.trim();
+  for (const s of Nt)
     if (s.test(t)) return "media";
-  for (const s of dt)
+  for (const s of ft)
     if (s.test(t)) return "system";
   return !e || e.trim() === "" ? "system" : "text";
 }
-function gt(n, e, t) {
-  let s, a, r;
+function yt(i, e, t) {
+  let s, n, r;
   if (t.locale === "pt-BR" || t.locale === "pt-PT") {
-    const [c, l, m] = n.split("/").map(Number);
-    s = c, a = l, r = m;
+    const [c, d, E] = i.split("/").map(Number);
+    s = c, n = d, r = E;
   } else if (t.locale === "en-US") {
-    const [c, l, m] = n.split("/").map(Number);
-    a = c, s = l, r = m;
+    const [c, d, E] = i.split("/").map(Number);
+    n = c, s = d, r = E;
   } else
-    [s, a, r] = n.split(/[\/\.\-]/).map(Number);
+    [s, n, r] = i.split(/[\/\.\-]/).map(Number);
   r < 100 && (r += r < 70 ? 2e3 : 1900);
-  let i, o;
+  let a, o;
   if (t.timeFormat === "12h") {
-    const c = /PM/i.test(e), m = e.replace(/\s*[AP]M/i, "").split(":").map(Number);
-    i = m[0], o = m[1], c && i !== 12 && (i += 12), !c && i === 12 && (i = 0);
+    const c = /PM/i.test(e), E = e.replace(/\s*[AP]M/i, "").split(":").map(Number);
+    a = E[0], o = E[1], c && a !== 12 && (a += 12), !c && a === 12 && (a = 0);
   } else {
     const c = e.split(":").map(Number);
-    i = c[0], o = c[1];
+    a = c[0], o = c[1];
   }
-  const d = Date.UTC(r, a - 1, s, i, o) / 1e3;
-  if (isNaN(d)) throw new Error(`Invalid timestamp: ${n} ${e}`);
-  return d;
+  const l = Date.UTC(r, n - 1, s, a, o) / 1e3;
+  if (isNaN(l)) throw new Error(`Invalid timestamp: ${i} ${e}`);
+  return l;
 }
-class _t {
+class wt {
   constructor(e = 7200, t = 400) {
-    E(this, "maxGapSeconds");
-    E(this, "maxTokens");
+    m(this, "maxGapSeconds");
+    m(this, "maxTokens");
     this.maxGapSeconds = e, this.maxTokens = t;
   }
   /**
@@ -1127,24 +1260,24 @@ class _t {
    * Messages are assumed to be pre-sorted by timestamp ascending.
    */
   group(e) {
-    var d, c;
+    var l, c;
     if (e.length === 0) return [];
-    const t = [...e].sort((l, m) => l.timestamp - m.timestamp), s = [];
-    let a = [t[0]], r = t[0].timestamp, i = t[0].timestamp, o = Math.ceil((((d = t[0].content) == null ? void 0 : d.length) || 0) / 4);
-    for (let l = 1; l < t.length; l++) {
-      const m = t[l], p = m.timestamp - i, g = Math.ceil((((c = m.content) == null ? void 0 : c.length) || 0) / 4);
-      p > this.maxGapSeconds || o + g > this.maxTokens ? (s.push({
-        messages: a,
+    const t = [...e].sort((d, E) => d.timestamp - E.timestamp), s = [];
+    let n = [t[0]], r = t[0].timestamp, a = t[0].timestamp, o = Math.ceil((((l = t[0].content) == null ? void 0 : l.length) || 0) / 4);
+    for (let d = 1; d < t.length; d++) {
+      const E = t[d], p = E.timestamp - a, _ = Math.ceil((((c = E.content) == null ? void 0 : c.length) || 0) / 4);
+      p > this.maxGapSeconds || o + _ > this.maxTokens ? (s.push({
+        messages: n,
         start_time: r,
-        end_time: i,
-        message_count: a.length
-      }), a = [m], r = m.timestamp, o = g) : (a.push(m), o += g), i = m.timestamp;
+        end_time: a,
+        message_count: n.length
+      }), n = [E], r = E.timestamp, o = _) : (n.push(E), o += _), a = E.timestamp;
     }
     return s.push({
-      messages: a,
+      messages: n,
       start_time: r,
-      end_time: i,
-      message_count: a.length
+      end_time: a,
+      message_count: n.length
     }), s;
   }
 }
@@ -1195,14 +1328,14 @@ const P = {
     purpose: "generation",
     quantization: "Q4_K_M"
   }
-}, ft = ["embedding", "worker", "brain"], D = class D {
+}, Dt = ["embedding", "worker", "brain"], w = class w {
   constructor() {
     /** Absolute path to the models directory in Electron's userData */
-    E(this, "modelsDir");
-    this.modelsDir = N.join(O.getPath("userData"), "models"), ee.mkdirSync(this.modelsDir, { recursive: !0 });
+    m(this, "modelsDir");
+    this.modelsDir = I.join(A.getPath("userData"), "models"), re.mkdirSync(this.modelsDir, { recursive: !0 });
   }
   static getInstance() {
-    return D.instance || (D.instance = new D()), D.instance;
+    return w.instance || (w.instance = new w()), w.instance;
   }
   /**
    * Checks whether a model file is present locally without triggering a download.
@@ -1212,13 +1345,13 @@ const P = {
    */
   async isAvailable(e) {
     try {
-      const t = await $(P[e].uri, {
+      const t = await V(P[e].uri, {
         directory: this.modelsDir,
         download: !1,
         // never trigger a download in a presence check
         cli: !1
       });
-      return ee.existsSync(t);
+      return re.existsSync(t);
     } catch {
       return !1;
     }
@@ -1229,12 +1362,12 @@ const P = {
    */
   async checkAll() {
     return await Promise.all(
-      ft.map(async (t) => {
-        const s = P[t], a = await this.isAvailable(t);
+      Dt.map(async (t) => {
+        const s = P[t], n = await this.isAvailable(t);
         let r;
-        if (a)
+        if (n)
           try {
-            r = await $(s.uri, {
+            r = await V(s.uri, {
               directory: this.modelsDir,
               download: !1,
               cli: !1
@@ -1247,7 +1380,7 @@ const P = {
           quantization: s.quantization,
           sizeEstimate: s.sizeEstimate,
           purpose: s.purpose,
-          available: a,
+          available: n,
           filePath: r
         };
       })
@@ -1269,19 +1402,19 @@ const P = {
   async download(e, t) {
     const s = P[e];
     console.log(`[ModelManager] Starting download: ${s.name} (${s.uri})`);
-    const r = await (await Oe({
+    const r = await (await xe({
       modelUri: s.uri,
       dirPath: this.modelsDir,
       showCliProgress: !1,
-      onProgress: ({ totalSize: i, downloadedSize: o }) => {
+      onProgress: ({ totalSize: a, downloadedSize: o }) => {
         if (t) {
-          const d = i ?? s.sizeEstimate;
+          const l = a ?? s.sizeEstimate;
           t({
             key: e,
             name: s.name,
             downloadedBytes: o,
-            totalBytes: d,
-            percent: d > 0 ? Math.round(o / d * 100) : 0,
+            totalBytes: l,
+            percent: l > 0 ? Math.round(o / l * 100) : 0,
             speed: 0
             // ipull doesn't expose instantaneous speed in onProgress
           });
@@ -1301,28 +1434,28 @@ const P = {
    */
   async resolve(e) {
     const t = P[e];
-    return $(t.uri, {
+    return V(t.uri, {
       directory: this.modelsDir,
       download: "auto",
       cli: !1
     });
   }
 };
-E(D, "instance", null);
-let v = D;
-const Nt = typeof __dirname < "u" ? __dirname : N.dirname(Q(import.meta.url)), k = class k {
+m(w, "instance", null);
+let X = w;
+const kt = typeof __dirname < "u" ? __dirname : I.dirname(ee(import.meta.url)), D = class D {
   constructor() {
-    E(this, "worker", null);
-    E(this, "pendingRequests", /* @__PURE__ */ new Map());
-    E(this, "initializationPromise", null);
-    E(this, "ready", !1);
+    m(this, "worker", null);
+    m(this, "pendingRequests", /* @__PURE__ */ new Map());
+    m(this, "initializationPromise", null);
+    m(this, "ready", !1);
     // Basic Batch Queue (Will be expanded in 3.4)
-    E(this, "batchQueue", []);
-    E(this, "processingQueue", !1);
-    E(this, "currentModelKey", "worker");
+    m(this, "batchQueue", []);
+    m(this, "processingQueue", !1);
+    m(this, "currentModelKey", "worker");
   }
   static getInstance() {
-    return k.instance || (k.instance = new k()), k.instance;
+    return D.instance || (D.instance = new D()), D.instance;
   }
   async initialize() {
     if (!this.ready) {
@@ -1334,8 +1467,8 @@ const Nt = typeof __dirname < "u" ? __dirname : N.dirname(Q(import.meta.url)), k
           console.warn("[WorkerProcess] Primary worker failed. Triggering fallback... Error:", s);
           try {
             await this.startWorker("worker_fallback"), this.currentModelKey = "worker_fallback", console.log("[WorkerProcess] Fallback to " + P.worker_fallback.name + " succeeded."), this.ready = !0, e();
-          } catch (a) {
-            console.error("[WorkerProcess] Fallback also failed:", a), this.initializationPromise = null, t(a);
+          } catch (n) {
+            console.error("[WorkerProcess] Fallback also failed:", n), this.initializationPromise = null, t(n);
           }
         }
       });
@@ -1349,16 +1482,16 @@ const Nt = typeof __dirname < "u" ? __dirname : N.dirname(Q(import.meta.url)), k
   startWorker(e) {
     return new Promise(async (t, s) => {
       console.log(`[WorkerProcess] Resolving model path for: ${e}...`);
-      const a = await v.getInstance().resolve(e);
+      const n = await X.getInstance().resolve(e);
       console.log(`[WorkerProcess] Forking Utility Process for ${e}...`);
-      const r = N.join(Nt, "worker-worker.js");
-      this.worker = me.fork(r, [], {
+      const r = I.join(kt, "worker-worker.js");
+      this.worker = fe.fork(r, [], {
         stdio: "inherit"
       }), this.worker.on("message", (o) => this.handleWorkerMessage(o)), this.worker.on("exit", (o) => {
         console.warn(`[WorkerProcess] Utility process exited with code ${o}`), this.ready = !1, this.worker = null, this.rejectAllPending(new Error(`Worker exited unexpectedly with code ${o}`));
       });
-      const i = _();
-      this.pendingRequests.set(i, {
+      const a = f();
+      this.pendingRequests.set(a, {
         resolve: async () => {
           console.log("[WorkerProcess] Initialized successfully. Running Day-0 test...");
           try {
@@ -1370,8 +1503,8 @@ const Nt = typeof __dirname < "u" ? __dirname : N.dirname(Q(import.meta.url)), k
         reject: s
       }), this.worker.postMessage({
         type: "init",
-        id: i,
-        payload: { modelPath: a }
+        id: a,
+        payload: { modelPath: n }
       });
     });
   }
@@ -1387,8 +1520,8 @@ const Nt = typeof __dirname < "u" ? __dirname : N.dirname(Q(import.meta.url)), k
   }
   // Queue wrapper
   async generateStream(e, t, s) {
-    return (!this.ready || !this.worker) && await this.initialize(), new Promise((a, r) => {
-      this.batchQueue.push({ prompt: e, options: s, resolve: a, reject: r, onToken: t }), this.processNextInQueue();
+    return (!this.ready || !this.worker) && await this.initialize(), new Promise((n, r) => {
+      this.batchQueue.push({ prompt: e, options: s, resolve: n, reject: r, onToken: t }), this.processNextInQueue();
     });
   }
   /**
@@ -1400,17 +1533,17 @@ const Nt = typeof __dirname < "u" ? __dirname : N.dirname(Q(import.meta.url)), k
    * Useful since smaller parameter models like LFM2.5-350M can drift out of grammar.
    */
   async generateJson(e, t, s = 3) {
-    let a = null, r = e;
-    for (let i = 1; i <= s; i++)
+    let n = null, r = e;
+    for (let a = 1; a <= s; a++)
       try {
         const o = await this.generate(r, t);
         return this.extractJson(o);
       } catch (o) {
-        a = o, console.warn(`[WorkerProcess] JSON extraction failed (attempt ${i}/${s}):`, o.message), r = e + `
+        n = o, console.warn(`[WorkerProcess] JSON extraction failed (attempt ${a}/${s}):`, o.message), r = e + `
 
 [SYSTEM FEEDBACK: Your previous response failed JSON parsing with error: ${o.message}. Please return strictly valid JSON without conversational wrapper text.]`;
       }
-    throw new Error(`[WorkerProcess] Failed to generate valid JSON after ${s} attempts. Last error: ${a == null ? void 0 : a.message}`);
+    throw new Error(`[WorkerProcess] Failed to generate valid JSON after ${s} attempts. Last error: ${n == null ? void 0 : n.message}`);
   }
   /**
    * Helper to strip markdown (e.g. \`\`\`json) and aggressively find the { ... } boundaries.
@@ -1458,8 +1591,8 @@ Query: "${e}"
       temperature: 0.05,
       maxTokens: 150,
       systemPrompt: "You are a headless JSON API. Respond only with valid JSON. Never output conversational text."
-    }, a = await this.generateJson(t, s, 3);
-    return ["factual", "aggregation", "narrative", "unknown"].includes(a.intent) || (a.intent = "factual"), (!a.keywords || !Array.isArray(a.keywords)) && (a.keywords = []), a;
+    }, n = await this.generateJson(t, s, 3);
+    return ["factual", "aggregation", "narrative", "unknown"].includes(n.intent) || (n.intent = "factual"), (!n.keywords || !Array.isArray(n.keywords)) && (n.keywords = []), n;
   }
   async expandKeywords(e) {
     const t = `You are a linguistic expansion tool for Portuguese chat logs. Output ONLY raw JSON.
@@ -1483,11 +1616,11 @@ Keywords: ${JSON.stringify(e)}
       systemPrompt: 'You are a headless JSON API. You MUST respond with exactly this JSON schema: {"expanded": ["str", "str"]}'
     };
     try {
-      const a = await this.generateJson(t, s, 2);
-      if (a.expanded && Array.isArray(a.expanded))
-        return Array.from(/* @__PURE__ */ new Set([...e, ...a.expanded]));
-    } catch (a) {
-      console.warn("[WorkerProcess] Failed to expand keywords", a);
+      const n = await this.generateJson(t, s, 2);
+      if (n.expanded && Array.isArray(n.expanded))
+        return Array.from(/* @__PURE__ */ new Set([...e, ...n.expanded]));
+    } catch (n) {
+      console.warn("[WorkerProcess] Failed to expand keywords", n);
     }
     return e;
   }
@@ -1519,16 +1652,16 @@ ${e}
       temperature: 0.1,
       maxTokens: 500,
       systemPrompt: "You are a headless JSON API. You MUST respond with valid JSON matching the exact schema."
-    }, a = Date.now();
+    }, n = Date.now();
     try {
-      const r = await this.generateJson(t, s, 3), i = Date.now() - a;
-      return console.log(`[WorkerProcess] extractSessionEntities completed in ${i}ms`), {
+      const r = await this.generateJson(t, s, 3), a = Date.now() - n;
+      return console.log(`[WorkerProcess] extractSessionEntities completed in ${a}ms`), {
         summary: r.summary || "Sessão extraída",
         mentioned_entities: Array.isArray(r.mentioned_entities) ? r.mentioned_entities : []
       };
     } catch (r) {
-      const i = Date.now() - a;
-      return console.error(`[WorkerProcess] extractSessionEntities completely failed after ${i}ms:`, r.message), {
+      const a = Date.now() - n;
+      return console.error(`[WorkerProcess] extractSessionEntities completely failed after ${a}ms:`, r.message), {
         summary: "Sessão extraída via fallback de erro",
         mentioned_entities: []
       };
@@ -1553,11 +1686,11 @@ ${e}
     }, t);
   }
   async internalGenerateStream(e, t, s) {
-    return new Promise((a, r) => {
-      const i = _();
-      this.pendingRequests.set(i, { resolve: a, reject: r, onToken: t }), this.worker.postMessage({
+    return new Promise((n, r) => {
+      const a = f();
+      this.pendingRequests.set(a, { resolve: n, reject: r, onToken: t }), this.worker.postMessage({
         type: "generate",
-        id: i,
+        id: a,
         payload: { prompt: e, options: s }
       });
     });
@@ -1579,12 +1712,12 @@ ${e}
     }), this.worker = null, this.ready = !1, this.rejectAllPending(new Error("WorkerProcess is disposing or shutting down")), this.initializationPromise = null);
   }
   handleWorkerMessage(e) {
-    const { type: t, id: s, error: a, token: r, text: i } = e;
+    const { type: t, id: s, error: n, token: r, text: a } = e;
     if (!s || !this.pendingRequests.has(s)) {
-      t === "error" && console.error("[Worker Global Error]", a);
+      t === "error" && console.error("[Worker Global Error]", n);
       return;
     }
-    const { resolve: o, reject: d, onToken: c } = this.pendingRequests.get(s);
+    const { resolve: o, reject: l, onToken: c } = this.pendingRequests.get(s);
     switch (t) {
       case "init-ready":
         this.pendingRequests.delete(s), o();
@@ -1593,10 +1726,10 @@ ${e}
         c && r && c(r);
         break;
       case "done":
-        this.pendingRequests.delete(s), o(i);
+        this.pendingRequests.delete(s), o(a);
         break;
       case "error":
-        this.pendingRequests.delete(s), d(new Error(a));
+        this.pendingRequests.delete(s), l(new Error(n));
         break;
       default:
         console.warn(`[WorkerProcess] Unrecognized message type '${t}'`);
@@ -1607,45 +1740,84 @@ ${e}
       s.reject(e), this.pendingRequests.delete(t);
   }
 };
-E(k, "instance", null);
-let B = k;
-const he = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+m(D, "instance", null);
+let v = D;
+const Le = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
-  WorkerProcess: B
-}, Symbol.toStringTag, { value: "Module" }));
-class St {
+  WorkerProcess: v
+}, Symbol.toStringTag, { value: "Module" })), k = class k {
   constructor() {
-    E(this, "parser", new ht());
-    E(this, "sessionEngine", new _t(7200));
+    m(this, "queue", []);
+  }
+  static getInstance() {
+    return k.instance || (k.instance = new k()), k.instance;
+  }
+  addMention(e, t, s) {
+    const n = {
+      id: f(),
+      sessionId: e,
+      alias: t,
+      context: s,
+      timestamp: Date.now()
+    };
+    return this.queue.push(n), n;
+  }
+  getPending() {
+    return [...this.queue];
+  }
+  getMentionById(e) {
+    return this.queue.find((t) => t.id === e);
+  }
+  removeMention(e) {
+    this.queue = this.queue.filter((t) => t.id !== e);
+  }
+  /**
+   * If there are clones (same alias) of an approved/resolved mention, we can auto-resolve them too.
+   * This method extracts all clones from the queue so they can be processed by the caller.
+   */
+  extractClones(e) {
+    const t = e.trim().toLowerCase(), s = this.queue.filter((n) => n.alias.trim().toLowerCase() === t);
+    return this.queue = this.queue.filter((n) => n.alias.trim().toLowerCase() !== t), s;
+  }
+  clear() {
+    this.queue = [];
+  }
+};
+m(k, "instance");
+let q = k;
+class Ct {
+  constructor() {
+    m(this, "parser", new At());
+    m(this, "sessionEngine", new wt(7200));
   }
   // > 2h gap
   async import(e, t) {
     const s = (r) => {
       t == null || t.send("import:progress", r);
     };
-    let a;
+    let n;
     try {
       s({ stage: "reading", percent: 5, label: "Lendo arquivo", detail: "Calculando hash..." });
-      const r = await It(e), i = R.getInstance(), o = new b(i);
+      const r = await Ft(e), a = N.getInstance(), o = new B(a);
       if (o.existsByHash(r))
         return { success: !1, duplicate: !0, error: "Arquivo já importado." };
-      const d = Re(e).replace(/\.[^/.]+$/, "");
-      a = _(), s({ stage: "parsing", percent: 15, label: "Parseando mensagens", detail: "Lendo chat base..." });
+      const l = Ce(e).replace(/\.[^/.]+$/, "");
+      n = f(), s({ stage: "parsing", percent: 15, label: "Parseando mensagens", detail: "Lendo chat base..." });
       const c = await this.parser.parse(e);
       if (c.messages.length === 0)
         return { success: !1, error: "Nenhuma mensagem encontrada." };
-      const l = c.messages.map((T) => ({
-        id: _(),
-        chat_id: a,
-        sender: T.sender,
-        content: T.content,
-        timestamp: T.timestamp,
-        type: T.type,
-        raw: T.raw
+      const d = c.messages.map((h) => ({
+        id: f(),
+        chat_id: n,
+        sender: h.sender,
+        content: h.content,
+        timestamp: h.timestamp,
+        type: h.type,
+        raw: h.raw
       }));
       o.create({
-        id: a,
-        name: d,
+        id: n,
+        name: l,
         source: "whatsapp",
         file_hash: r,
         participant_count: c.stats.participants.length,
@@ -1653,108 +1825,106 @@ class St {
         first_message_at: c.stats.firstTimestamp ?? void 0,
         last_message_at: c.stats.lastTimestamp ?? void 0
       }), s({ stage: "fts_indexing", percent: 25, label: "Agrupando Sessões", detail: "Topologia Cronológica..." });
-      const m = this.sessionEngine.group(c.messages), p = [];
-      for (const T of m)
+      const E = this.sessionEngine.group(c.messages), p = [];
+      for (const h of E)
         p.push({
-          id: _(),
-          chat_id: a,
-          start_time: T.start_time,
-          end_time: T.end_time,
-          message_count: T.message_count,
+          id: f(),
+          chat_id: n,
+          start_time: h.start_time,
+          end_time: h.end_time,
+          message_count: h.message_count,
           summary: "Processando IA em background..."
           // Temporary summary
         });
-      return s({ stage: "fts_indexing", percent: 40, label: "Salvando no banco", detail: "Persistindo histórico nativo e Indexando FTS5..." }), new J(i).insertBatch(l), new G(i).insertBatch(p, []), this.runBackgroundNLP(a, m, p, t).catch((T) => {
-        console.error("[Background NLP Error]", T);
+      return s({ stage: "fts_indexing", percent: 40, label: "Salvando no banco", detail: "Persistindo histórico nativo e Indexando FTS5..." }), new se(a).insertBatch(d), new z(a).insertBatch(p, []), this.runBackgroundNLP(n, E, p, t).catch((h) => {
+        console.error("[Background NLP Error]", h);
       }), {
         success: !0,
-        chatId: a,
-        chatName: d,
+        chatId: n,
+        chatName: l,
         messageCount: c.messages.length,
         chunkCount: p.length
         // total sessions
       };
     } catch (r) {
-      if (a)
+      if (n)
         try {
-          const o = R.getInstance();
-          new b(o).delete(a);
+          const o = N.getInstance();
+          new B(o).delete(n);
         } catch {
         }
-      const i = r instanceof Error ? r.message : String(r);
-      return console.error("[ChatImportService] Import failed:", i), s({ stage: "error", percent: 0, label: "Erro na importação", detail: i }), { success: !1, error: i };
+      const a = r instanceof Error ? r.message : String(r);
+      return console.error("[ChatImportService] Import failed:", a), s({ stage: "error", percent: 0, label: "Erro na importação", detail: a }), { success: !1, error: a };
     }
   }
   /**
    * Background process to extract summaries and entities via Worker
    */
-  async runBackgroundNLP(e, t, s, a) {
-    const r = (i) => {
-      a == null || a.send("import:progress", i);
+  async runBackgroundNLP(e, t, s, n) {
+    const r = (a) => {
+      n == null || n.send("import:progress", a);
     };
     try {
       r({ stage: "nlp_summaries", percent: 20, label: "Extração NLP Iniciada", detail: `Processando ${t.length} sessões...`, chatId: e });
-      const i = B.getInstance();
-      await i.initialize();
-      const o = R.getInstance(), d = new G(o);
+      const a = v.getInstance();
+      await a.initialize();
+      const o = N.getInstance(), l = new z(o);
       let c = 0;
-      for (let l = 0; l < t.length; l++) {
-        const m = t[l], p = s[l], I = `Read the following chat session and extract the main summary and any notable entities mentioned (names, places, topics) along with their action/intent.
-Respond ONLY with a valid JSON strictly matching this schema:
-{
-  "summary": "general summary of what happened",
-  "entities": [
-    { "name": "Raw Name", "type": "person/place/game/topic", "action": "What they did or intent" }
-  ]
-}
-
-CHAT SESSION:
-${m.messages.map((h) => `[${new Date(h.timestamp * 1e3).toISOString()}] ${h.sender}: ${h.content}`).join(`
-`)}`;
-        let T = "Sessão concluída (sem detalhes extraídos)", y = [];
+      for (let d = 0; d < t.length; d++) {
+        const E = t[d], p = s[d], _ = E.messages.map((u) => `[${new Date(u.timestamp * 1e3).toISOString()}] ${u.sender}: ${u.content}`).join(`
+`);
+        let S = "Sessão concluída (sem detalhes extraídos)", h = [];
         try {
-          const h = await i.generateJson(I, { maxTokens: 800, temperature: 0.1 }, 3);
-          h.summary && (T = h.summary), h.entities && Array.isArray(h.entities) && (y = h.entities);
-        } catch (h) {
-          console.warn("[ChatImportService Worker] Worker extraction failed on session:", h.message);
+          const u = await a.extractSessionEntities(_);
+          u.summary && (S = u.summary), u.mentioned_entities && (h = u.mentioned_entities);
+        } catch (u) {
+          console.warn("[ChatImportService Worker] Worker extraction failed on session:", u.message);
         }
-        const L = [];
-        for (const h of y)
-          h.name && L.push({
-            id: _(),
+        const L = [], O = new Y(o), M = q.getInstance();
+        for (const u of h)
+          if (u.name && (L.push({
+            id: f(),
             session_id: p.id,
-            name: h.name,
-            normalized_name: h.name.toLowerCase().trim(),
-            type: h.type || "unknown",
-            action: h.action || "mentioned"
-          });
-        d.updateSessionNLP(p.id, T, L), c++;
-        const A = c > t.length * 0.7;
+            name: u.name,
+            normalized_name: u.name.toLowerCase().trim(),
+            type: u.type || "unknown",
+            action: u.context || "mentioned"
+          }), !u.is_participant && u.type === "person")) {
+            const ie = O.findProbableMatch(u.name).find((H) => H.name.toLowerCase() === u.name.toLowerCase());
+            if (ie)
+              O.linkMention(p.id, ie.id, u.context);
+            else {
+              const H = M.addMention(p.id, u.name, u.context);
+              n == null || n.send("ingest:mention_detected", H);
+            }
+          }
+        l.updateSessionNLP(p.id, S, L), c++;
+        const ne = c > t.length * 0.7;
         (c % 5 === 0 || c === t.length) && r({
-          stage: A ? "nlp_entities" : "nlp_summaries",
+          stage: ne ? "nlp_entities" : "nlp_summaries",
           percent: 20 + Math.round(c / t.length * 80),
-          label: A ? "Resolvendo Entidades" : "Processando Resumos (Batch)",
+          label: ne ? "Resolvendo Entidades" : "Processando Resumos (Batch)",
           detail: `${c} / ${t.length} sessões analisadas...`,
           chatId: e
           // Note: sending chatId along to identify bg process per chat
         });
       }
       r({ stage: "done", percent: 100, label: "Concluído", detail: "Entidades Indexadas para o chat.", chatId: e });
-    } catch (i) {
-      console.error("[Background NLP Exception]", i);
+    } catch (a) {
+      console.error("[Background NLP Exception]", a);
     }
   }
 }
-function It(n) {
+function Ft(i) {
   return new Promise((e, t) => {
-    const s = Le("sha256"), a = K(n);
-    a.on("data", (r) => s.update(r)), a.on("end", () => e(s.digest("hex"))), a.on("error", t);
+    const s = Ue("sha256"), n = te(i);
+    n.on("data", (r) => s.update(r)), n.on("end", () => e(s.digest("hex"))), n.on("error", t);
   });
 }
-const Rt = new St();
-function yt(n) {
-  f.handle("import:chat", async (e, t) => Rt.import(t, n.webContents)), f.handle("import:file-dialog", async () => {
-    const e = await Ee.showOpenDialog(n, {
+const Ut = new Ct();
+function xt(i) {
+  g.handle("import:chat", async (e, t) => Ut.import(t, i.webContents)), g.handle("import:file-dialog", async () => {
+    const e = await Ne.showOpenDialog(i, {
       title: "Selecionar export do WhatsApp",
       filters: [
         { name: "WhatsApp Export", extensions: ["txt", "zip"] },
@@ -1765,12 +1935,12 @@ function yt(n) {
     return e.canceled || e.filePaths.length === 0 ? null : e.filePaths[0];
   });
 }
-function Lt(n) {
-  const e = v.getInstance();
-  f.handle("models:check", async () => e.checkAll()), f.handle("models:download", async (t, s) => e.download(s, (a) => {
-    n.isDestroyed() || n.webContents.send("models:progress", a);
-  })), f.handle("models:select-file", async () => {
-    const t = await Ee.showOpenDialog(n, {
+function Pt(i) {
+  const e = X.getInstance();
+  g.handle("models:check", async () => e.checkAll()), g.handle("models:download", async (t, s) => e.download(s, (n) => {
+    i.isDestroyed() || i.webContents.send("models:progress", n);
+  })), g.handle("models:select-file", async () => {
+    const t = await Ne.showOpenDialog(i, {
       title: "Selecionar Modelo GGUF (BYOM)",
       filters: [
         { name: "GGUF Models", extensions: ["gguf"] },
@@ -1781,48 +1951,48 @@ function Lt(n) {
     return t.canceled || t.filePaths.length === 0 ? null : t.filePaths[0];
   });
 }
-const F = class F {
+const C = class C {
   constructor() {
-    E(this, "chatRepo");
-    E(this, "sessionRepo");
-    E(this, "messageRepo");
-    const e = R.getInstance();
-    this.chatRepo = new b(e), this.sessionRepo = new G(e), this.messageRepo = new J(e);
+    m(this, "chatRepo");
+    m(this, "sessionRepo");
+    m(this, "messageRepo");
+    const e = N.getInstance();
+    this.chatRepo = new B(e), this.sessionRepo = new z(e), this.messageRepo = new se(e);
   }
   static getInstance() {
-    return F.instance || (F.instance = new F()), F.instance;
+    return C.instance || (C.instance = new C()), C.instance;
   }
   async search(e, t) {
     console.log(`[SearchService] Resolving deterministic search for: "${e}"`);
-    const s = B.getInstance(), a = await s.classifyQuery(e);
-    console.log(`[SearchService] Intent: ${a.intent} | Keywords: ${a.keywords.join(", ")}`);
-    const r = a.intent, i = a.keywords && a.keywords.length > 0 ? a.keywords : [e], o = {
+    const s = v.getInstance(), n = await s.classifyQuery(e);
+    console.log(`[SearchService] Intent: ${n.intent} | Keywords: ${n.keywords.join(", ")}`);
+    const r = n.intent, a = n.keywords && n.keywords.length > 0 ? n.keywords : [e], o = {
       dateFrom: t == null ? void 0 : t.dateFrom,
       dateTo: t == null ? void 0 : t.dateTo
     };
     console.log("[SearchService] Executing Ontology Hop (Entity Expansion)...");
-    const d = await s.expandKeywords(i), c = Array.from(/* @__PURE__ */ new Set([...i, ...d])), m = this.sessionRepo.searchAggregation(c, 8, o).map((I) => I.name);
-    m.length > 0 && console.log(`[SearchService] Ontology hop discovered relevant context entities: ${m.join(", ")}`);
-    const p = Array.from(/* @__PURE__ */ new Set([...c, ...m]));
-    let g = this.performRouting(r, p, o);
-    return g.length === 0 && console.warn("[SearchService] Data inexistent even after lexical and ontological expansions."), g;
+    const l = await s.expandKeywords(a), c = Array.from(/* @__PURE__ */ new Set([...a, ...l])), E = this.sessionRepo.searchAggregation(c, 8, o).map((S) => S.name);
+    E.length > 0 && console.log(`[SearchService] Ontology hop discovered relevant context entities: ${E.join(", ")}`);
+    const p = Array.from(/* @__PURE__ */ new Set([...c, ...E]));
+    let _ = this.performRouting(r, p, o);
+    return _.length === 0 && console.warn("[SearchService] Data inexistent even after lexical and ontological expansions."), _;
   }
   performRouting(e, t, s) {
-    const a = [];
+    const n = [];
     if (e === "aggregation") {
       const r = this.sessionRepo.searchAggregation(t, 20, s);
       if (r.length > 0) {
-        let i = `Aggregation Results:
+        let a = `Aggregation Results:
 `;
         for (const o of r)
-          i += `- Entity: ${o.name} (${o.type}) | Count: ${o.count}
+          a += `- Entity: ${o.name} (${o.type}) | Count: ${o.count}
 `;
-        a.push({
-          id: _(),
+        n.push({
+          id: f(),
           chatId: "",
           chatName: "Global Aggregations",
           score: 1,
-          content: i,
+          content: a,
           date: (/* @__PURE__ */ new Date()).toISOString(),
           sender: "System",
           intent: "aggregation",
@@ -1831,66 +2001,66 @@ const F = class F {
       }
     } else if (e === "narrative") {
       const r = this.sessionRepo.searchNarrative(t, 5, s);
-      for (const i of r) {
-        const o = this.chatRepo.findById(i.chat_id);
-        a.push({
-          id: i.id,
-          chatId: i.chat_id,
+      for (const a of r) {
+        const o = this.chatRepo.findById(a.chat_id);
+        n.push({
+          id: a.id,
+          chatId: a.chat_id,
           chatName: (o == null ? void 0 : o.name) || "Unknown Chat",
           score: 0.9,
           content: `SESSION SUMMARY
-${i.summary}`,
-          date: new Date(i.start_time * 1e3).toISOString(),
+${a.summary}`,
+          date: new Date(a.start_time * 1e3).toISOString(),
           sender: "System",
           intent: "narrative"
         });
       }
     } else {
       const r = this.messageRepo.searchFactual(t, 15, 5);
-      for (const i of r) {
-        if (i.length === 0) continue;
-        const o = this.chatRepo.findById(i[0].chat_id);
-        let d = "";
-        for (const c of i) {
-          const m = new Date(c.timestamp * 1e3).toISOString().split("T")[1].slice(0, 5);
-          d += `[${m}] ${c.sender}: ${c.content}
+      for (const a of r) {
+        if (a.length === 0) continue;
+        const o = this.chatRepo.findById(a[0].chat_id);
+        let l = "";
+        for (const c of a) {
+          const E = new Date(c.timestamp * 1e3).toISOString().split("T")[1].slice(0, 5);
+          l += `[${E}] ${c.sender}: ${c.content}
 `;
         }
-        a.push({
-          id: _(),
-          chatId: i[0].chat_id,
+        n.push({
+          id: f(),
+          chatId: a[0].chat_id,
           chatName: (o == null ? void 0 : o.name) || "Unknown Chat",
           score: 1,
-          content: d.trim(),
-          date: new Date(i[0].timestamp * 1e3).toISOString(),
-          sender: i[0].sender,
+          content: l.trim(),
+          date: new Date(a[0].timestamp * 1e3).toISOString(),
+          sender: a[0].sender,
           intent: "factual"
         });
       }
     }
-    return a;
+    return n;
   }
 };
-E(F, "instance", null);
-let z = F;
-function Ot() {
-  f.handle("search:query", async (n, e, t) => {
+m(C, "instance", null);
+let $ = C;
+function Mt() {
+  g.handle("search:query", async (i, e, t) => {
     try {
-      return await z.getInstance().search(e, t);
+      return await $.getInstance().search(e, t);
     } catch (s) {
       return console.error("[SearchHandlers] Error executing search:", s), [];
     }
   });
 }
-const At = typeof __dirname < "u" ? __dirname : N.dirname(Q(import.meta.url)), U = class U {
+const bt = typeof __dirname < "u" ? __dirname : I.dirname(ee(import.meta.url)), F = class F {
   constructor() {
-    E(this, "worker", null);
-    E(this, "pendingRequests", /* @__PURE__ */ new Map());
-    E(this, "initializationPromise", null);
-    E(this, "ready", !1);
+    m(this, "worker", null);
+    m(this, "pendingRequests", /* @__PURE__ */ new Map());
+    m(this, "initializationPromise", null);
+    m(this, "ready", !1);
   }
   static getInstance() {
-    return U.instance || (U.instance = new U()), U.instance;
+    return F.instance || (F.instance = new F()), F.instance;
   }
   async initialize() {
     if (!this.ready) {
@@ -1898,15 +2068,15 @@ const At = typeof __dirname < "u" ? __dirname : N.dirname(Q(import.meta.url)), U
       this.initializationPromise = new Promise(async (e, t) => {
         try {
           console.log("[BrainProcess] Resolving Brain model path...");
-          const s = await v.getInstance().resolve("brain");
+          const s = await X.getInstance().resolve("brain");
           console.log("[BrainProcess] Forking Utility Process...");
-          const a = N.join(At, "brain-worker.js");
-          this.worker = me.fork(a, [], {
+          const n = I.join(bt, "brain-worker.js");
+          this.worker = fe.fork(n, [], {
             stdio: "inherit"
-          }), this.worker.on("message", (i) => this.handleWorkerMessage(i)), this.worker.on("exit", (i) => {
-            console.warn(`[BrainProcess] Utility process exited with code ${i}`), this.ready = !1, this.worker = null, this.rejectAllPending(new Error(`Brain Worker exited unexpectedly with code ${i}`));
+          }), this.worker.on("message", (a) => this.handleWorkerMessage(a)), this.worker.on("exit", (a) => {
+            console.warn(`[BrainProcess] Utility process exited with code ${a}`), this.ready = !1, this.worker = null, this.rejectAllPending(new Error(`Brain Worker exited unexpectedly with code ${a}`));
           });
-          const r = _();
+          const r = f();
           this.pendingRequests.set(r, {
             resolve: () => {
               console.log("[BrainProcess] Utility Process initialized successfully."), this.ready = !0, e();
@@ -1936,11 +2106,11 @@ const At = typeof __dirname < "u" ? __dirname : N.dirname(Q(import.meta.url)), U
     }, t);
   }
   async generateStream(e, t, s) {
-    return (!this.ready || !this.worker) && await this.initialize(), new Promise((a, r) => {
-      const i = _();
-      this.pendingRequests.set(i, { resolve: a, reject: r, onToken: t }), this.worker.postMessage({
+    return (!this.ready || !this.worker) && await this.initialize(), new Promise((n, r) => {
+      const a = f();
+      this.pendingRequests.set(a, { resolve: n, reject: r, onToken: t }), this.worker.postMessage({
         type: "generate",
-        id: i,
+        id: a,
         payload: { prompt: e, options: s }
       });
     });
@@ -1962,12 +2132,12 @@ const At = typeof __dirname < "u" ? __dirname : N.dirname(Q(import.meta.url)), U
     }), this.worker = null, this.ready = !1, this.rejectAllPending(new Error("BrainProcess is disposing or shutting down")), this.initializationPromise = null);
   }
   handleWorkerMessage(e) {
-    const { type: t, id: s, error: a, token: r, text: i } = e;
+    const { type: t, id: s, error: n, token: r, text: a } = e;
     if (!s || !this.pendingRequests.has(s)) {
-      t === "error" && console.error("[BrainWorker Global Error]", a);
+      t === "error" && console.error("[BrainWorker Global Error]", n);
       return;
     }
-    const { resolve: o, reject: d, onToken: c } = this.pendingRequests.get(s);
+    const { resolve: o, reject: l, onToken: c } = this.pendingRequests.get(s);
     switch (t) {
       case "init-ready":
         this.pendingRequests.delete(s), o();
@@ -1976,10 +2146,10 @@ const At = typeof __dirname < "u" ? __dirname : N.dirname(Q(import.meta.url)), U
         c && r && c(r);
         break;
       case "done":
-        this.pendingRequests.delete(s), o(i);
+        this.pendingRequests.delete(s), o(a);
         break;
       case "error":
-        this.pendingRequests.delete(s), d(new Error(a));
+        this.pendingRequests.delete(s), l(new Error(n));
         break;
       default:
         console.warn(`[BrainWorker] Unrecognized message type '${t}'`);
@@ -1990,34 +2160,34 @@ const At = typeof __dirname < "u" ? __dirname : N.dirname(Q(import.meta.url)), U
       s.reject(e), this.pendingRequests.delete(t);
   }
 };
-E(U, "instance", null);
-let Y = U;
-const ge = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+m(F, "instance", null);
+let W = F;
+const Oe = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
-  BrainProcess: Y
-}, Symbol.toStringTag, { value: "Module" })), wt = {
-  buildRAGPrompt: (n, e) => {
-    const t = e.map((i) => `[${i.date} - ${i.sender}]: ${i.content}`).join(`
+  BrainProcess: W
+}, Symbol.toStringTag, { value: "Module" })), Bt = {
+  buildRAGPrompt: (i, e) => {
+    const t = e.map((a) => `[${a.date} - ${a.sender}]: ${a.content}`).join(`
 
 `);
     let s = "";
     if (e.length > 0) {
-      const i = e.map((o) => new Date(o.date).getTime()).filter((o) => !isNaN(o));
-      if (i.length > 0) {
-        const o = new Date(Math.min(...i)).toISOString().split("T")[0], d = new Date(Math.max(...i)).toISOString().split("T")[0];
+      const a = e.map((o) => new Date(o.date).getTime()).filter((o) => !isNaN(o));
+      if (a.length > 0) {
+        const o = new Date(Math.min(...a)).toISOString().split("T")[0], l = new Date(Math.max(...a)).toISOString().split("T")[0];
         s = `
-Regra OBRIGATÓRIA: Baseie-se EXATAMENTE nas datas providenciadas no prompt (de ${o} a ${d}). Nunca alucine datas ou informações fora desse intervalo.`;
+Regra OBRIGATÓRIA: Baseie-se EXATAMENTE nas datas providenciadas no prompt (de ${o} a ${l}). Nunca alucine datas ou informações fora desse intervalo.`;
       }
     }
-    const a = `Você é um assistente cirúrgico que extrai informações de dados históricos. Baseie sua resposta APENAS no contexto fornecido.${s}`, r = `DADOS E CONTEXTO OBTIDOS (Fontes imutáveis):
+    const n = `Você é um assistente cirúrgico que extrai informações de dados históricos. Baseie sua resposta APENAS no contexto fornecido.${s}`, r = `DADOS E CONTEXTO OBTIDOS (Fontes imutáveis):
 ${t}
 
-PERGUNTA DO USUÁRIO: ${n}
+PERGUNTA DO USUÁRIO: ${i}
 
 Responda EXATAMENTE o que foi perguntado, formatando de maneira limpa. Se a resposta não estiver nos dados, declare tratar-se de "dados inexistentes".`;
-    return { systemPrompt: a, userPrompt: r };
+    return { systemPrompt: n, userPrompt: r };
   }
-}, q = {
+}, Q = {
   gpu: "auto",
   temperature: 0.3,
   systemPrompt: "Você é um assistente encarregado de ler históricos de chat. Responda apenas com o que estiver no contexto.",
@@ -2027,140 +2197,140 @@ Responda EXATAMENTE o que foi perguntado, formatando de maneira limpa. Se a resp
   customBrainPath: null,
   customWorkerPath: null,
   customEmbeddingPath: null
-}, C = class C {
+}, U = class U {
   constructor() {
-    E(this, "settingsPath");
-    E(this, "currentSettings");
-    const e = O.getPath("userData");
-    this.settingsPath = Ae.join(e, "settings.json"), this.currentSettings = { ...q }, this.load();
+    m(this, "settingsPath");
+    m(this, "currentSettings");
+    const e = A.getPath("userData");
+    this.settingsPath = Pe.join(e, "settings.json"), this.currentSettings = { ...Q }, this.load();
   }
   static getInstance() {
-    return C.instance || (C.instance = new C()), C.instance;
+    return U.instance || (U.instance = new U()), U.instance;
   }
   get() {
     return { ...this.currentSettings };
   }
   update(e) {
-    const t = e.gpu !== void 0 && e.gpu !== this.currentSettings.gpu, s = "customBrainPath" in e && e.customBrainPath !== this.currentSettings.customBrainPath, a = "customWorkerPath" in e && e.customWorkerPath !== this.currentSettings.customWorkerPath;
+    const t = e.gpu !== void 0 && e.gpu !== this.currentSettings.gpu, s = "customBrainPath" in e && e.customBrainPath !== this.currentSettings.customBrainPath, n = "customWorkerPath" in e && e.customWorkerPath !== this.currentSettings.customWorkerPath;
     return this.currentSettings = {
       ...this.currentSettings,
       ...e
-    }, this.save(), (t || s || a) && setTimeout(async () => {
+    }, this.save(), (t || s || n) && setTimeout(async () => {
       console.log("[SettingsService] Critical backend setting changed. Disposing active models for cold-restart.");
-      const { WorkerProcess: r } = await Promise.resolve().then(() => he), { BrainProcess: i } = await Promise.resolve().then(() => ge);
+      const { WorkerProcess: r } = await Promise.resolve().then(() => Le), { BrainProcess: a } = await Promise.resolve().then(() => Oe);
       try {
         r.getInstance().dispose();
       } catch {
       }
       try {
-        i.getInstance().dispose();
+        a.getInstance().dispose();
       } catch {
       }
     }, 0), this.get();
   }
   load() {
     try {
-      if (W.existsSync(this.settingsPath)) {
-        const e = W.readFileSync(this.settingsPath, "utf-8"), t = JSON.parse(e);
+      if (j.existsSync(this.settingsPath)) {
+        const e = j.readFileSync(this.settingsPath, "utf-8"), t = JSON.parse(e);
         this.currentSettings = {
-          ...q,
+          ...Q,
           ...t
         };
       } else
         this.save();
     } catch (e) {
-      console.error("[SettingsService] Failed to load settings:", e), this.currentSettings = { ...q };
+      console.error("[SettingsService] Failed to load settings:", e), this.currentSettings = { ...Q };
     }
   }
   save() {
     try {
-      W.writeFileSync(this.settingsPath, JSON.stringify(this.currentSettings, null, 2));
+      j.writeFileSync(this.settingsPath, JSON.stringify(this.currentSettings, null, 2));
     } catch (e) {
       console.error("[SettingsService] Failed to save settings:", e);
     }
   }
 };
-E(C, "instance");
-let X = C;
+m(U, "instance");
+let G = U;
 const x = class x {
   constructor() {
   }
   static getInstance() {
     return x.instance || (x.instance = new x()), x.instance;
   }
-  async generateStream(e, t, s, a) {
-    const r = performance.now(), i = { embedding: 0, search: 0, generation: 0, total: 0 };
+  async generateStream(e, t, s, n) {
+    const r = performance.now(), a = { embedding: 0, search: 0, generation: 0, total: 0 };
     let o = [];
     try {
-      a && a("booting");
-      const d = X.getInstance().get();
-      a && a("searching");
+      n && n("booting");
+      const l = G.getInstance().get();
+      n && n("searching");
       const c = performance.now();
-      if (o = await z.getInstance().search(e, {
-        limit: d.topK,
+      if (o = await $.getInstance().search(e, {
+        limit: l.topK,
         chatId: s == null ? void 0 : s.chatId
-      }), i.search = performance.now() - c, o.length === 0)
-        return i.total = performance.now() - r, {
+      }), a.search = performance.now() - c, o.length === 0)
+        return a.total = performance.now() - r, {
           answer: "Dados inexistentes. Não foi possível localizar o contexto ou menções referentes à sua busca neste chat.",
           context: o,
           tokensUsed: 0,
-          latency: i
+          latency: a
         };
-      a && a("processing");
-      const { userPrompt: l } = wt.buildRAGPrompt(e, o), m = d.systemPrompt;
-      a && a("synthesizing");
-      const p = performance.now(), g = Y.getInstance();
-      let I = "", T = 0;
+      n && n("processing");
+      const { userPrompt: d } = Bt.buildRAGPrompt(e, o), E = l.systemPrompt;
+      n && n("synthesizing");
+      const p = performance.now(), _ = W.getInstance();
+      let S = "", h = 0;
       try {
-        I = await g.generateStream(
-          l,
-          (y) => {
-            T++, t && t(y);
+        S = await _.generateStream(
+          d,
+          (L) => {
+            h++, t && t(L);
           },
           {
-            temperature: (s == null ? void 0 : s.temperature) ?? d.temperature,
+            temperature: (s == null ? void 0 : s.temperature) ?? l.temperature,
             maxTokens: (s == null ? void 0 : s.maxTokens) || 1024,
-            systemPrompt: m
+            systemPrompt: E
           }
         );
-      } catch (y) {
-        console.error("[RAGService] Error generating response from BrainProcess:", y), I = `Desculpe, ocorreu um erro ao gerar a resposta ou a IA falhou.
+      } catch (L) {
+        console.error("[RAGService] Error generating response from BrainProcess:", L), S = `Desculpe, ocorreu um erro ao gerar a resposta ou a IA falhou.
 
-Contexto encontrado:` + o.map((L, A) => `
-[${A + 1}] ${L.date} ${L.sender}: ${L.content}`).join("");
+Contexto encontrado:` + o.map((O, M) => `
+[${M + 1}] ${O.date} ${O.sender}: ${O.content}`).join("");
       }
-      return i.generation = performance.now() - p, i.total = performance.now() - r, {
-        answer: I,
+      return a.generation = performance.now() - p, a.total = performance.now() - r, {
+        answer: S,
         context: o,
-        tokensUsed: T,
-        latency: i
+        tokensUsed: h,
+        latency: a
       };
-    } catch (d) {
-      throw console.error("[RAGService] Fatal error in RAG pipeline:", d), d;
+    } catch (l) {
+      throw console.error("[RAGService] Fatal error in RAG pipeline:", l), l;
     }
   }
 };
-E(x, "instance", null);
-let V = x;
-function Dt(n) {
-  f.handle("rag:query", async (e, t, s) => {
+m(x, "instance", null);
+let J = x;
+function Xt(i) {
+  g.handle("rag:query", async (e, t, s) => {
     try {
-      const r = await V.getInstance().generateStream(
+      const r = await J.getInstance().generateStream(
         t,
-        (i) => {
-          n.webContents.send("rag:token", i);
+        (a) => {
+          i.webContents.send("rag:token", a);
         },
         s,
-        (i) => {
-          n.webContents.send("rag:step", i);
+        (a) => {
+          i.webContents.send("rag:step", a);
         }
       );
-      n.webContents.send("rag:done", r);
-    } catch (a) {
-      throw console.error("[IPC rag:query] Error:", a), a;
+      i.webContents.send("rag:done", r);
+    } catch (n) {
+      throw console.error("[IPC rag:query] Error:", n), n;
     }
-  }), f.handle("rag:status", async () => {
-    const { BrainProcess: e } = await Promise.resolve().then(() => ge), { WorkerProcess: t } = await Promise.resolve().then(() => he);
+  }), g.handle("rag:status", async () => {
+    const { BrainProcess: e } = await Promise.resolve().then(() => Oe), { WorkerProcess: t } = await Promise.resolve().then(() => Le);
     return {
       brain: {
         ready: e.getInstance().isReady()
@@ -2172,19 +2342,64 @@ function Dt(n) {
     };
   });
 }
-function kt() {
-  f.handle("settings:get", async () => X.getInstance().get()), f.handle("settings:update", async (n, e) => X.getInstance().update(e));
+function vt() {
+  g.handle("settings:get", async () => G.getInstance().get()), g.handle("settings:update", async (i, e) => G.getInstance().update(e));
 }
-function Ft(n) {
-  at(), yt(n), Lt(n), Ot(), Dt(n), kt();
+const _e = [
+  "#ef4444",
+  "#f97316",
+  "#f59e0b",
+  "#84cc16",
+  "#22c55e",
+  "#06b6d4",
+  "#3b82f6",
+  "#6366f1",
+  "#a855f7",
+  "#ec4899"
+];
+function Gt() {
+  return _e[Math.floor(Math.random() * _e.length)];
 }
-const _e = N.dirname(Q(import.meta.url));
-process.env.APP_ROOT = N.join(_e, "..");
-const j = process.env.VITE_DEV_SERVER_URL, Yt = N.join(process.env.APP_ROOT, "dist-electron"), fe = N.join(process.env.APP_ROOT, "dist");
-process.env.VITE_PUBLIC = j ? N.join(process.env.APP_ROOT, "public") : fe;
-let u;
-function Ne() {
-  u = new ue({
+function Yt() {
+  const i = q.getInstance();
+  g.handle("mentions:get_pending", async () => i.getPending()), g.handle("mentions:get_people", async () => {
+    const e = N.getInstance();
+    return new Y(e).findAll();
+  }), g.handle("mentions:get_relations", async () => {
+    const e = N.getInstance();
+    return new Y(e).findAllRelations();
+  }), g.handle("mentions:resolve", async (e, t, s, n) => {
+    const r = i.getMentionById(t);
+    if (!r)
+      throw new Error(`Mention ${t} not found in pending inbox.`);
+    const a = N.getInstance(), o = new Y(a), l = i.extractClones(r.alias), c = [r, ...l.filter((d) => d.id !== r.id)];
+    try {
+      if (s === "create_new") {
+        const d = o.createPersonWithAlias(r.alias, r.alias, Gt());
+        for (const E of c)
+          o.linkMention(E.sessionId, d, E.context);
+      } else if (s === "link_existing") {
+        if (!n) throw new Error("personId required for link_existing");
+        a.prepare("INSERT OR IGNORE INTO person_aliases (person_id, alias) VALUES (?, ?)").run(n, r.alias);
+        for (const d of c)
+          o.linkMention(d.sessionId, n, d.context);
+      }
+      i.removeMention(t);
+    } catch (d) {
+      throw console.error("[PeopleHandlers] Failed to resolve mention:", d), d;
+    }
+  });
+}
+function zt(i) {
+  ut(), xt(i), Pt(i), Mt(), Xt(i), vt(), Yt();
+}
+const Ae = I.dirname(ee(import.meta.url));
+process.env.APP_ROOT = I.join(Ae, "..");
+const Z = process.env.VITE_DEV_SERVER_URL, ss = I.join(process.env.APP_ROOT, "dist-electron"), ye = I.join(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = Z ? I.join(process.env.APP_ROOT, "public") : ye;
+let T;
+function we() {
+  T = new Ie({
     width: 1280,
     height: 800,
     minWidth: 900,
@@ -2196,35 +2411,35 @@ function Ne() {
     show: !1,
     // Prevent white flash
     webPreferences: {
-      preload: N.join(_e, "preload.mjs"),
+      preload: I.join(Ae, "preload.mjs"),
       contextIsolation: !0,
       nodeIntegration: !1
     }
-  }), u.once("ready-to-show", () => {
-    u == null || u.show();
-  }), f.on("window:minimize", () => u == null ? void 0 : u.minimize()), f.on("window:maximize", () => {
-    u != null && u.isMaximized() ? u.unmaximize() : u == null || u.maximize();
-  }), f.on("window:close", () => u == null ? void 0 : u.close()), Ft(u), j ? (u.loadURL(j), u.webContents.openDevTools({ mode: "detach" })) : u.loadFile(N.join(fe, "index.html"));
+  }), T.once("ready-to-show", () => {
+    T == null || T.show();
+  }), g.on("window:minimize", () => T == null ? void 0 : T.minimize()), g.on("window:maximize", () => {
+    T != null && T.isMaximized() ? T.unmaximize() : T == null || T.maximize();
+  }), g.on("window:close", () => T == null ? void 0 : T.close()), zt(T), Z ? (T.loadURL(Z), T.webContents.openDevTools({ mode: "detach" })) : T.loadFile(I.join(ye, "index.html"));
 }
-O.on("window-all-closed", () => {
-  process.platform !== "darwin" && (O.quit(), u = null);
+A.on("window-all-closed", () => {
+  process.platform !== "darwin" && (A.quit(), T = null);
 });
-O.on("activate", () => {
-  ue.getAllWindows().length === 0 && Ne();
+A.on("activate", () => {
+  Ie.getAllWindows().length === 0 && we();
 });
-O.on("before-quit", () => {
-  R.close();
+A.on("before-quit", () => {
+  N.close();
 });
-O.whenReady().then(() => {
+A.whenReady().then(() => {
   try {
-    R.getInstance();
-  } catch (n) {
-    console.error("[Main] Failed to initialize database:", n);
+    N.getInstance();
+  } catch (i) {
+    console.error("[Main] Failed to initialize database:", i);
   }
-  Ne();
+  we();
 });
 export {
-  Yt as MAIN_DIST,
-  fe as RENDERER_DIST,
-  j as VITE_DEV_SERVER_URL
+  ss as MAIN_DIST,
+  ye as RENDERER_DIST,
+  Z as VITE_DEV_SERVER_URL
 };

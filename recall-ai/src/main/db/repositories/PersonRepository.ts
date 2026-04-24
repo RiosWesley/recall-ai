@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
 import { nanoid } from 'nanoid'
-import type { Person } from '../../../shared/types'
+import type { Person, PersonRelation } from '../../../shared/types'
 
 export class PersonRepository {
   constructor(private readonly db: Database.Database) {}
@@ -57,6 +57,15 @@ export class PersonRepository {
     `
     const matchQuery = `"${cleanAlias}"*`
     return this.db.prepare(query).all(matchQuery) as Person[]
+  }
+
+  /**
+   * Returns all person relations.
+   */
+  findAllRelations(): PersonRelation[] {
+    return this.db.prepare(`
+      SELECT * FROM person_relations
+    `).all() as PersonRelation[]
   }
 
   /**

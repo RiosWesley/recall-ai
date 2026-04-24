@@ -820,45 +820,45 @@ src/main/services/
 
 ---
 
-## [ ] TASK 6.1 — Otimização da Ingestão de Memórias
+## [x] TASK 6.1 — Otimização da Ingestão de Memórias
 
 **Objetivo:** Refinar o chunking adaptativo e o prompt do LFM2.5 para incluir de forma estrita "Menções a Terceiros" em JSON.
 **Documentação completa:** `docs/task-docs/01-ingestion-optimization.md`
 **Critérios de aceitação:**
-- [ ] Agrupamento adaptativo implementado sem diluir atenção do LLM.
-- [ ] Prompt retorna entidades mencionadas (`mentioned_entities`) com `name` e `context`.
-- [ ] Fallbacks e métricas de desempenho em logs.
+- [x] Agrupamento adaptativo implementado sem diluir atenção do LLM.
+- [x] Prompt retorna entidades mencionadas (`mentioned_entities`) com `name` e `context`.
+- [x] Fallbacks e métricas de desempenho em logs.
 
 ---
 
-## [ ] TASK 6.2 — Criação do Schema de Pessoas
+## [x] TASK 6.2 — Criação do Schema de Pessoas
 
 **Objetivo:** Adicionar tabelas SQLite (`people`, `person_aliases`, `person_relations`, `person_mentions`) para suporte ao mapeamento.
 **Documentação completa:** `docs/task-docs/02-people-schema.md`
 **Critérios de aceitação:**
-- [ ] Tabelas `people`, `person_aliases`, etc, criadas via migration.
-- [ ] Repositórios atualizados para lidar com as amarrações do grafo.
+- [x] Tabelas `people`, `person_aliases`, etc, criadas via migration.
+- [x] Repositórios atualizados para lidar com as amarrações do grafo.
 
 ---
 
-## [ ] TASK 6.3 — Lógica de Desambiguação de Menções
+## [x] TASK 6.3 — Lógica de Desambiguação de Menções
 
 **Objetivo:** Implementar o fluxo assíncrono (Inbox) que identifica uma menção e permite ao usuário confirmar se é uma pessoa já existente ou criar uma nova.
 **Documentação completa:** `docs/task-docs/03-interactive-disambiguation.md`
 **Critérios de aceitação:**
-- [ ] FTS5 Match parcial pausa a entidade não resolvida.
-- [ ] Fluxo IPC envia menção à "Caixa de Entrada".
-- [ ] Ação do usuário é commitada no banco definitivo.
+- [x] FTS5 Match parcial pausa a entidade não resolvida.
+- [x] Fluxo IPC envia menção à "Caixa de Entrada".
+- [x] Ação do usuário é commitada no banco definitivo.
 
 ---
 
-## [ ] TASK 6.4 — Integração Frontend (People.tsx)
+## [x] TASK 6.4 — Integração Frontend (People.tsx)
 
 **Objetivo:** Interligar o Mock de `People.tsx` ao Banco e implementar o Inbox de Menções (Modal UI).
 **Documentação completa:** `docs/task-docs/04-people-ui-integration.md`
 **Critérios de aceitação:**
-- [ ] Lista de pessoas real aparece no grafo de `People.tsx`.
-- [ ] Modal de "Resolução de Menção" construído no Frontend e ligado aos eventos IPC.
+- [x] Lista de pessoas real aparece no grafo de `People.tsx`.
+- [x] Modal de "Resolução de Menção" construído no Frontend e ligado aos eventos IPC.
 
 ---
 
@@ -871,8 +871,8 @@ src/main/services/
 | **Fase 3** — Dual-Model Architecture | 4 | 2 | 🟡 Em andamento (Worker Pending) |
 | **Fase 4** — Deterministic Pipeline | 2 | 1 | 🟡 Em andamento |
 | **Fase 5** — Interactive Interface & QA | 3 | 0 | ⬜ Não iniciada |
-| **Fase 6** — Identity Graph & Mentions | 4 | 0 | ⬜ Não iniciada |
-| **TOTAL** | **22** | **12** | **54%** |
+| **Fase 6** — Identity Graph & Mentions | 4 | 4 | ✅ Concluída |
+| **TOTAL** | **22** | **16** | **72%** |
 
 **Milestones:**
 - [x] **MVP 1** — Pipeline de Storage Básico Funcional
