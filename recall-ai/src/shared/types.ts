@@ -189,7 +189,7 @@ export interface SearchResult {
   date: string // Display date
   sender: string
   chunkId?: string // Deprecated post-005, kept for compatibility
-  
+
   // Context Bridging fields (Task 4.1)
   intent?: SearchIntent
   metadata?: Record<string, any> // E.g., for aggregations: { count: 5, type: 'theme' }

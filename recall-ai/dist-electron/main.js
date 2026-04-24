@@ -1,17 +1,18 @@
-var De = Object.defineProperty;
-var ke = (i, e, t) => e in i ? De(i, e, { enumerable: !0, configurable: !0, writable: !0, value: t }) : i[e] = t;
-var m = (i, e, t) => ke(i, typeof e != "symbol" ? e + "" : e, t);
-import { app as A, ipcMain as g, utilityProcess as fe, dialog as Ne, BrowserWindow as Ie } from "electron";
-import { fileURLToPath as ee } from "node:url";
-import I, { basename as Ce } from "node:path";
-import Fe from "better-sqlite3";
-import { webcrypto as ae, createHash as Ue } from "node:crypto";
-import re, { createReadStream as te } from "node:fs";
-import { createInterface as Se } from "node:readline";
-import { resolveModelFile as V, createModelDownloader as xe } from "node-llama-cpp";
-import j from "fs";
-import Pe from "path";
-const oe = "001_initial", Me = `
+var __defProp = Object.defineProperty;
+var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
+import { app, ipcMain, utilityProcess, dialog, BrowserWindow } from "electron";
+import { fileURLToPath } from "node:url";
+import path, { basename } from "node:path";
+import Database from "better-sqlite3";
+import { webcrypto, createHash } from "node:crypto";
+import fs, { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
+import { resolveModelFile, createModelDownloader } from "node-llama-cpp";
+import fs$1 from "fs";
+import path$1 from "path";
+const MIGRATION_ID$7 = "001_initial";
+const SCHEMA_SQL$4 = `
   -- ============================================================
   -- CHATS — imported WhatsApp conversations
   -- ============================================================
@@ -90,7 +91,8 @@ const oe = "001_initial", Me = `
   CREATE INDEX IF NOT EXISTS idx_messages_sender    ON messages(sender);
   CREATE INDEX IF NOT EXISTS idx_chunks_chat        ON chunks(chat_id);
   CREATE INDEX IF NOT EXISTS idx_chunks_time        ON chunks(start_time, end_time);
-`, be = `
+`;
+const VIRTUAL_TABLES_SQL$2 = `
   -- ============================================================
   -- VECTORS — sqlite-vec KNN (created only if extension loaded)
   -- ============================================================
@@ -107,40 +109,57 @@ const oe = "001_initial", Me = `
     chunk_id UNINDEXED,
     tokenize='unicode61'
   );
-`, Be = `
+`;
+const FTS5_ONLY_SQL$2 = `
   -- FTS5 table only (when sqlite-vec not available)
   CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
     content,
     chunk_id UNINDEXED,
     tokenize='unicode61'
   );
-`, Xe = `
+`;
+const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS _migrations (
     id TEXT PRIMARY KEY,
     applied_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
   );
 `;
-function ve(i) {
-  if (i.exec(Xe), i.prepare(
+function runMigrations(db) {
+  db.exec(MIGRATIONS_TABLE_SQL);
+  const existing = db.prepare(
     "SELECT id FROM _migrations WHERE id = ?"
-  ).get(oe)) {
+  ).get(MIGRATION_ID$7);
+  if (existing) {
     console.log("[DB] Migration 001_initial already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 001_initial..."), i.transaction(() => {
-    i.exec(Me), Ge(i) ? (console.log("[DB] sqlite-vec detected — creating vectors + chunks_fts tables"), i.exec(be)) : (console.log("[DB] sqlite-vec not detected — creating chunks_fts only"), i.exec(Be)), i.prepare(
+  console.log("[DB] Running migration 001_initial...");
+  db.transaction(() => {
+    db.exec(SCHEMA_SQL$4);
+    const hasSqliteVec = isSqliteVecLoaded$3(db);
+    if (hasSqliteVec) {
+      console.log("[DB] sqlite-vec detected — creating vectors + chunks_fts tables");
+      db.exec(VIRTUAL_TABLES_SQL$2);
+    } else {
+      console.log("[DB] sqlite-vec not detected — creating chunks_fts only");
+      db.exec(FTS5_ONLY_SQL$2);
+    }
+    db.prepare(
       "INSERT INTO _migrations (id) VALUES (?)"
-    ).run(oe);
-  })(), console.log("[DB] Migration 001_initial complete");
+    ).run(MIGRATION_ID$7);
+  })();
+  console.log("[DB] Migration 001_initial complete");
 }
-function Ge(i) {
+function isSqliteVecLoaded$3(db) {
   try {
-    return i.prepare("SELECT vec_version()").get(), !0;
+    db.prepare("SELECT vec_version()").get();
+    return true;
   } catch {
-    return !1;
+    return false;
   }
 }
-const ce = "002_add_profile_facts", Ye = `
+const MIGRATION_ID$6 = "002_add_profile_facts";
+const SCHEMA_SQL$3 = `
   -- ============================================================
   -- PROFILE FACTS — synthetic sentences about conversation patterns
   -- ============================================================
@@ -156,7 +175,8 @@ const ce = "002_add_profile_facts", Ye = `
 
   -- Index to speed up retrieval by contact
   CREATE INDEX IF NOT EXISTS idx_profile_facts_contact ON profile_facts(contact_id);
-`, ze = `
+`;
+const FTS5_SQL = `
   -- FTS5 table for profile_facts mapping rowid to id
   CREATE VIRTUAL TABLE IF NOT EXISTS profile_facts_fts USING fts5(
     text,
@@ -174,7 +194,8 @@ const ce = "002_add_profile_facts", Ye = `
   BEGIN
     DELETE FROM profile_facts_fts WHERE fact_id = old.id;
   END;
-`, qe = `
+`;
+const VECTORS_SQL = `
   -- SQLite-vec table for semantic search on profile_facts
   -- Use vec0 for dynamic loading
   CREATE VIRTUAL TABLE IF NOT EXISTS profile_facts_vectors USING vec0(
@@ -182,27 +203,38 @@ const ce = "002_add_profile_facts", Ye = `
     embedding FLOAT[768]
   );
 `;
-function $e(i) {
-  if (i.prepare(
+function runMigration002(db) {
+  const existing = db.prepare(
     "SELECT id FROM _migrations WHERE id = ?"
-  ).get(ce)) {
+  ).get(MIGRATION_ID$6);
+  if (existing) {
     console.log("[DB] Migration 002_add_profile_facts already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 002_add_profile_facts..."), i.transaction(() => {
-    i.exec(Ye), i.exec(ze), We(i) && (console.log("[DB] sqlite-vec detected — creating profile_facts_vectors table"), i.exec(qe)), i.prepare(
+  console.log("[DB] Running migration 002_add_profile_facts...");
+  db.transaction(() => {
+    db.exec(SCHEMA_SQL$3);
+    db.exec(FTS5_SQL);
+    if (isSqliteVecLoaded$2(db)) {
+      console.log("[DB] sqlite-vec detected — creating profile_facts_vectors table");
+      db.exec(VECTORS_SQL);
+    }
+    db.prepare(
       "INSERT INTO _migrations (id) VALUES (?)"
-    ).run(ce);
-  })(), console.log("[DB] Migration 002_add_profile_facts complete");
+    ).run(MIGRATION_ID$6);
+  })();
+  console.log("[DB] Migration 002_add_profile_facts complete");
 }
-function We(i) {
+function isSqliteVecLoaded$2(db) {
   try {
-    return i.prepare("SELECT vec_version()").get(), !0;
+    db.prepare("SELECT vec_version()").get();
+    return true;
   } catch {
-    return !1;
+    return false;
   }
 }
-const de = "003_add_contact_profiles", He = `
+const MIGRATION_ID$5 = "003_add_contact_profiles";
+const SCHEMA_SQL$2 = `
   -- ============================================================
   -- CONTACT PROFILES — Generated by LLM Map-Reduce pipeline
   -- ============================================================
@@ -241,20 +273,25 @@ const de = "003_add_contact_profiles", He = `
 
   CREATE INDEX IF NOT EXISTS idx_block_summaries_contact ON block_summaries(contact_id);
 `;
-function Ve(i) {
-  if (i.prepare(
+function runMigration003(db) {
+  const existing = db.prepare(
     "SELECT id FROM _migrations WHERE id = ?"
-  ).get(de)) {
+  ).get(MIGRATION_ID$5);
+  if (existing) {
     console.log("[DB] Migration 003_add_contact_profiles already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 003_add_contact_profiles..."), i.transaction(() => {
-    i.exec(He), i.prepare(
+  console.log("[DB] Running migration 003_add_contact_profiles...");
+  db.transaction(() => {
+    db.exec(SCHEMA_SQL$2);
+    db.prepare(
       "INSERT INTO _migrations (id) VALUES (?)"
-    ).run(de);
-  })(), console.log("[DB] Migration 003_add_contact_profiles complete");
+    ).run(MIGRATION_ID$5);
+  })();
+  console.log("[DB] Migration 003_add_contact_profiles complete");
 }
-const le = "004_parent_child_chunks", je = `
+const MIGRATION_ID$4 = "004_parent_child_chunks";
+const SCHEMA_SQL$1 = `
   -- ============================================================
   -- PARENT CHUNKS — contexto completo retornado ao LLM
   -- ============================================================
@@ -290,7 +327,8 @@ const le = "004_parent_child_chunks", je = `
   CREATE INDEX IF NOT EXISTS idx_parent_chunks_chat ON parent_chunks(chat_id);
   CREATE INDEX IF NOT EXISTS idx_child_chunks_parent ON child_chunks(parent_id);
   CREATE INDEX IF NOT EXISTS idx_child_chunks_time ON child_chunks(start_time, end_time);
-`, Qe = `
+`;
+const VIRTUAL_TABLES_SQL$1 = `
   -- ============================================================
   -- VECTORS — child embeddings via sqlite-vec
   -- ============================================================
@@ -307,30 +345,44 @@ const le = "004_parent_child_chunks", je = `
     chunk_id UNINDEXED,
     tokenize='unicode61'
   );
-`, Ke = `
+`;
+const FTS5_ONLY_SQL$1 = `
   CREATE VIRTUAL TABLE IF NOT EXISTS child_chunks_fts USING fts5(
     content,
     chunk_id UNINDEXED,
     tokenize='unicode61'
   );
 `;
-function Je(i) {
-  if (i.prepare("SELECT id FROM _migrations WHERE id = ?").get(le)) {
+function runMigration004(db) {
+  const existing = db.prepare("SELECT id FROM _migrations WHERE id = ?").get(MIGRATION_ID$4);
+  if (existing) {
     console.log("[DB] Migration 004_parent_child_chunks already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 004_parent_child_chunks..."), i.transaction(() => {
-    i.exec(je), Ze(i) ? (console.log("[DB] sqlite-vec detected — creating child_vectors + child_chunks_fts tables"), i.exec(Qe)) : (console.log("[DB] sqlite-vec not detected — creating child_chunks_fts only"), i.exec(Ke)), i.prepare("INSERT INTO _migrations (id) VALUES (?)").run(le);
-  })(), console.log("[DB] Migration 004_parent_child_chunks complete");
+  console.log("[DB] Running migration 004_parent_child_chunks...");
+  db.transaction(() => {
+    db.exec(SCHEMA_SQL$1);
+    if (isSqliteVecLoaded$1(db)) {
+      console.log("[DB] sqlite-vec detected — creating child_vectors + child_chunks_fts tables");
+      db.exec(VIRTUAL_TABLES_SQL$1);
+    } else {
+      console.log("[DB] sqlite-vec not detected — creating child_chunks_fts only");
+      db.exec(FTS5_ONLY_SQL$1);
+    }
+    db.prepare("INSERT INTO _migrations (id) VALUES (?)").run(MIGRATION_ID$4);
+  })();
+  console.log("[DB] Migration 004_parent_child_chunks complete");
 }
-function Ze(i) {
+function isSqliteVecLoaded$1(db) {
   try {
-    return i.prepare("SELECT vec_version()").get(), !0;
+    db.prepare("SELECT vec_version()").get();
+    return true;
   } catch {
-    return !1;
+    return false;
   }
 }
-const Ee = "005_propositions", et = `
+const MIGRATION_ID$3 = "005_propositions";
+const SCHEMA_SQL = `
   -- ============================================================
   -- PROPOSITIONS — extracted facts from parent chunks
   -- ============================================================
@@ -348,7 +400,8 @@ const Ee = "005_propositions", et = `
 
   CREATE INDEX IF NOT EXISTS idx_propositions_chat ON propositions(chat_id);
   CREATE INDEX IF NOT EXISTS idx_propositions_parent ON propositions(parent_chunk_id);
-`, tt = `
+`;
+const VIRTUAL_TABLES_SQL = `
   -- ============================================================
   -- VECTORS — propositions embeddings via sqlite-vec
   -- ============================================================
@@ -366,7 +419,8 @@ const Ee = "005_propositions", et = `
     proposition_id UNINDEXED,
     tokenize='unicode61 remove_diacritics 2'
   );
-`, st = `
+`;
+const FTS5_ONLY_SQL = `
   CREATE VIRTUAL TABLE IF NOT EXISTS propositions_fts USING fts5(
     fact,
     original_quote,
@@ -374,23 +428,36 @@ const Ee = "005_propositions", et = `
     tokenize='unicode61 remove_diacritics 2'
   );
 `;
-function nt(i) {
-  if (i.prepare("SELECT id FROM _migrations WHERE id = ?").get(Ee)) {
+function runMigration005(db) {
+  const existing = db.prepare("SELECT id FROM _migrations WHERE id = ?").get(MIGRATION_ID$3);
+  if (existing) {
     console.log("[DB] Migration 005_propositions already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 005_propositions..."), i.transaction(() => {
-    i.exec(et), it(i) ? (console.log("[DB] sqlite-vec detected — creating proposition_vectors + propositions_fts tables"), i.exec(tt)) : (console.log("[DB] sqlite-vec not detected — creating propositions_fts only"), i.exec(st)), i.prepare("INSERT INTO _migrations (id) VALUES (?)").run(Ee);
-  })(), console.log("[DB] Migration 005_propositions complete");
+  console.log("[DB] Running migration 005_propositions...");
+  db.transaction(() => {
+    db.exec(SCHEMA_SQL);
+    if (isSqliteVecLoaded(db)) {
+      console.log("[DB] sqlite-vec detected — creating proposition_vectors + propositions_fts tables");
+      db.exec(VIRTUAL_TABLES_SQL);
+    } else {
+      console.log("[DB] sqlite-vec not detected — creating propositions_fts only");
+      db.exec(FTS5_ONLY_SQL);
+    }
+    db.prepare("INSERT INTO _migrations (id) VALUES (?)").run(MIGRATION_ID$3);
+  })();
+  console.log("[DB] Migration 005_propositions complete");
 }
-function it(i) {
+function isSqliteVecLoaded(db) {
   try {
-    return i.prepare("SELECT vec_version()").get(), !0;
+    db.prepare("SELECT vec_version()").get();
+    return true;
   } catch {
-    return !1;
+    return false;
   }
 }
-const me = "006_intelligent_ingestion", at = `
+const MIGRATION_ID$2 = "006_intelligent_ingestion";
+const DROP_AND_RECREATE_SQL = `
   -- We drop vector and chunks tables since we are moving away from vector embeddings and strict token chunks
   DROP TABLE IF EXISTS proposition_vectors;
   DROP TABLE IF EXISTS fact_vectors;
@@ -454,16 +521,21 @@ const me = "006_intelligent_ingestion", at = `
   CREATE INDEX IF NOT EXISTS idx_sessions_time ON sessions(start_time, end_time);
   CREATE INDEX IF NOT EXISTS idx_entities_session ON entities(session_id);
 `;
-function rt(i) {
-  if (i.prepare("SELECT id FROM _migrations WHERE id = ?").get(me)) {
+function runMigration006(db) {
+  const existing = db.prepare("SELECT id FROM _migrations WHERE id = ?").get(MIGRATION_ID$2);
+  if (existing) {
     console.log("[DB] Migration 006_intelligent_ingestion already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 006_intelligent_ingestion..."), i.transaction(() => {
-    i.exec(at), i.prepare("INSERT INTO _migrations (id) VALUES (?)").run(me);
-  })(), console.log("[DB] Migration 006_intelligent_ingestion complete");
+  console.log("[DB] Running migration 006_intelligent_ingestion...");
+  db.transaction(() => {
+    db.exec(DROP_AND_RECREATE_SQL);
+    db.prepare("INSERT INTO _migrations (id) VALUES (?)").run(MIGRATION_ID$2);
+  })();
+  console.log("[DB] Migration 006_intelligent_ingestion complete");
 }
-const pe = "007_search_indexes", ot = `
+const MIGRATION_ID$1 = "007_search_indexes";
+const MIGRATION_SQL$1 = `
   -- Cria VIRTUAL TABLE para permitir busca rapida FTS5 nas mensagens individuais
   CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     sender,
@@ -494,16 +566,21 @@ const pe = "007_search_indexes", ot = `
     VALUES (new.sender, new.content, new.id);
   END;
 `;
-function ct(i) {
-  if (i.prepare("SELECT id FROM _migrations WHERE id = ?").get(pe)) {
+function runMigration007(db) {
+  const existing = db.prepare("SELECT id FROM _migrations WHERE id = ?").get(MIGRATION_ID$1);
+  if (existing) {
     console.log("[DB] Migration 007_search_indexes already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 007_search_indexes..."), i.transaction(() => {
-    i.exec(ot), i.prepare("INSERT INTO _migrations (id) VALUES (?)").run(pe);
-  })(), console.log("[DB] Migration 007_search_indexes complete");
+  console.log("[DB] Running migration 007_search_indexes...");
+  db.transaction(() => {
+    db.exec(MIGRATION_SQL$1);
+    db.prepare("INSERT INTO _migrations (id) VALUES (?)").run(MIGRATION_ID$1);
+  })();
+  console.log("[DB] Migration 007_search_indexes complete");
 }
-const ue = "008_people_schema", dt = `
+const MIGRATION_ID = "008_people_schema";
+const MIGRATION_SQL = `
   -- ============================================================
   -- PEOPLE — The root nodes for the Identity Graph
   -- ============================================================
@@ -567,56 +644,92 @@ const ue = "008_people_schema", dt = `
   CREATE INDEX IF NOT EXISTS idx_person_mentions_session ON person_mentions(session_id);
   CREATE INDEX IF NOT EXISTS idx_person_relations_target ON person_relations(target_id);
 `;
-function lt(i) {
-  if (i.prepare("SELECT id FROM _migrations WHERE id = ?").get(ue)) {
+function runMigration008(db) {
+  const existing = db.prepare("SELECT id FROM _migrations WHERE id = ?").get(MIGRATION_ID);
+  if (existing) {
     console.log("[DB] Migration 008_people_schema already applied — skipping");
     return;
   }
-  console.log("[DB] Running migration 008_people_schema..."), i.transaction(() => {
-    i.exec(dt), i.prepare("INSERT INTO _migrations (id) VALUES (?)").run(ue);
-  })(), console.log("[DB] Migration 008_people_schema complete");
+  console.log("[DB] Running migration 008_people_schema...");
+  db.transaction(() => {
+    db.exec(MIGRATION_SQL);
+    db.prepare("INSERT INTO _migrations (id) VALUES (?)").run(MIGRATION_ID);
+  })();
+  console.log("[DB] Migration 008_people_schema complete");
 }
-const R = class R {
+const _DatabaseService = class _DatabaseService {
   static getInstance() {
-    if (R.db)
-      return R.db;
-    const e = A.getPath("userData"), t = I.join(e, "recall-ai.db");
-    console.log("[DB] Opening database at:", t);
-    const s = new Fe(t, {
+    if (_DatabaseService.db) {
+      return _DatabaseService.db;
+    }
+    const userDataPath = app.getPath("userData");
+    const dbPath = path.join(userDataPath, "recall-ai.db");
+    console.log("[DB] Opening database at:", dbPath);
+    const db = new Database(dbPath, {
       verbose: process.env.NODE_ENV === "development" ? console.log : void 0
     });
-    return s.pragma("journal_mode = WAL"), s.pragma("foreign_keys = ON"), s.pragma("synchronous = NORMAL"), s.pragma("cache_size = -32000"), s.pragma("temp_store = MEMORY"), R.db = s, ve(s), $e(s), Ve(s), Je(s), nt(s), rt(s), ct(s), lt(s), console.log("[DB] Database ready"), s;
+    db.pragma("journal_mode = WAL");
+    db.pragma("foreign_keys = ON");
+    db.pragma("synchronous = NORMAL");
+    db.pragma("cache_size = -32000");
+    db.pragma("temp_store = MEMORY");
+    _DatabaseService.db = db;
+    runMigrations(db);
+    runMigration002(db);
+    runMigration003(db);
+    runMigration004(db);
+    runMigration005(db);
+    runMigration006(db);
+    runMigration007(db);
+    runMigration008(db);
+    console.log("[DB] Database ready");
+    return db;
   }
   /** Close the database connection (call on app quit) */
   static close() {
-    R.db && (R.db.close(), R.db = null, console.log("[DB] Database closed"));
+    if (_DatabaseService.db) {
+      _DatabaseService.db.close();
+      _DatabaseService.db = null;
+      console.log("[DB] Database closed");
+    }
   }
   /** Check if the database is open */
   static isOpen() {
-    return R.db !== null && R.db.open;
+    return _DatabaseService.db !== null && _DatabaseService.db.open;
   }
 };
-m(R, "db", null);
-let N = R, Et = "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
-const mt = 128;
-let y, b;
-function pt(i) {
-  !y || y.length < i ? (y = Buffer.allocUnsafe(i * mt), ae.getRandomValues(y), b = 0) : b + i > y.length && (ae.getRandomValues(y), b = 0), b += i;
-}
-function f(i = 21) {
-  pt(i |= 0);
-  let e = "";
-  for (let t = b - i; t < b; t++)
-    e += Et[y[t] & 63];
-  return e;
-}
-class B {
-  constructor(e) {
-    this.db = e;
+__publicField(_DatabaseService, "db", null);
+let DatabaseService = _DatabaseService;
+let urlAlphabet = "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
+const POOL_SIZE_MULTIPLIER = 128;
+let pool, poolOffset;
+function fillPool(bytes) {
+  if (!pool || pool.length < bytes) {
+    pool = Buffer.allocUnsafe(bytes * POOL_SIZE_MULTIPLIER);
+    webcrypto.getRandomValues(pool);
+    poolOffset = 0;
+  } else if (poolOffset + bytes > pool.length) {
+    webcrypto.getRandomValues(pool);
+    poolOffset = 0;
   }
-  create(e) {
-    const t = e.id ?? f(), s = Math.floor(Date.now() / 1e3);
-    return this.db.prepare(`
+  poolOffset += bytes;
+}
+function nanoid(size = 21) {
+  fillPool(size |= 0);
+  let id = "";
+  for (let i = poolOffset - size; i < poolOffset; i++) {
+    id += urlAlphabet[pool[i] & 63];
+  }
+  return id;
+}
+class ChatRepository {
+  constructor(db) {
+    this.db = db;
+  }
+  create(chat) {
+    const id = chat.id ?? nanoid();
+    const now = Math.floor(Date.now() / 1e3);
+    this.db.prepare(`
       INSERT INTO chats (
         id, name, source, participant_count, message_count,
         first_message_at, last_message_at, imported_at, file_hash, metadata
@@ -625,130 +738,140 @@ class B {
         @first_message_at, @last_message_at, @imported_at, @file_hash, @metadata
       )
     `).run({
-      id: t,
-      name: e.name,
-      source: e.source ?? "whatsapp",
-      participant_count: e.participant_count ?? null,
-      message_count: e.message_count ?? 0,
-      first_message_at: e.first_message_at ?? null,
-      last_message_at: e.last_message_at ?? null,
-      imported_at: s,
-      file_hash: e.file_hash ?? null,
-      metadata: e.metadata ? JSON.stringify(e.metadata) : null
-    }), this.findById(t);
+      id,
+      name: chat.name,
+      source: chat.source ?? "whatsapp",
+      participant_count: chat.participant_count ?? null,
+      message_count: chat.message_count ?? 0,
+      first_message_at: chat.first_message_at ?? null,
+      last_message_at: chat.last_message_at ?? null,
+      imported_at: now,
+      file_hash: chat.file_hash ?? null,
+      metadata: chat.metadata ? JSON.stringify(chat.metadata) : null
+    });
+    return this.findById(id);
   }
   findAll() {
-    return this.db.prepare(
+    const rows = this.db.prepare(
       "SELECT * FROM chats ORDER BY imported_at DESC"
-    ).all().map(Te);
+    ).all();
+    return rows.map(deserializeChat);
   }
-  findById(e) {
-    const t = this.db.prepare(
+  findById(id) {
+    const row = this.db.prepare(
       "SELECT * FROM chats WHERE id = ?"
-    ).get(e);
-    return t ? Te(t) : null;
+    ).get(id);
+    return row ? deserializeChat(row) : null;
   }
-  delete(e) {
-    this.db.prepare("DELETE FROM chats WHERE id = ?").run(e);
+  delete(id) {
+    this.db.prepare("DELETE FROM chats WHERE id = ?").run(id);
   }
-  existsByHash(e) {
-    return this.db.prepare(
+  existsByHash(fileHash) {
+    const row = this.db.prepare(
       "SELECT id FROM chats WHERE file_hash = ?"
-    ).get(e) !== void 0;
+    ).get(fileHash);
+    return row !== void 0;
   }
-  updateMessageCount(e, t) {
+  updateMessageCount(id, count) {
     this.db.prepare(
       "UPDATE chats SET message_count = ? WHERE id = ?"
-    ).run(t, e);
+    ).run(count, id);
   }
-  updateParticipantCount(e, t) {
+  updateParticipantCount(id, count) {
     this.db.prepare(
       "UPDATE chats SET participant_count = ? WHERE id = ?"
-    ).run(t, e);
+    ).run(count, id);
   }
-  updateTimestamps(e, t, s) {
+  updateTimestamps(id, firstAt, lastAt) {
     this.db.prepare(
       "UPDATE chats SET first_message_at = ?, last_message_at = ? WHERE id = ?"
-    ).run(t, s, e);
+    ).run(firstAt, lastAt, id);
   }
 }
-function Te(i) {
+function deserializeChat(row) {
   return {
-    ...i,
-    metadata: i.metadata ? JSON.parse(i.metadata) : null
+    ...row,
+    metadata: row.metadata ? JSON.parse(row.metadata) : null
   };
 }
-class se {
-  constructor(e) {
-    this.db = e;
+class MessageRepository {
+  constructor(db) {
+    this.db = db;
   }
   /**
    * Insert a batch of messages in a single transaction.
    * Duplicate rows (same chat_id + timestamp + sender + content) are silently ignored.
    */
-  insertBatch(e) {
-    if (e.length === 0) return;
-    const t = this.db.prepare(`
+  insertBatch(messages) {
+    if (messages.length === 0) return;
+    const insert = this.db.prepare(`
       INSERT OR IGNORE INTO messages (id, chat_id, sender, content, timestamp, type, raw)
       VALUES (@id, @chat_id, @sender, @content, @timestamp, @type, @raw)
     `);
-    this.db.transaction((n) => {
-      for (const r of n)
-        t.run({
-          id: r.id ?? f(),
-          chat_id: r.chat_id,
-          sender: r.sender,
-          content: r.content,
-          timestamp: r.timestamp,
-          type: r.type ?? "text",
-          raw: r.raw ?? null
+    const runAll = this.db.transaction((msgs) => {
+      for (const msg of msgs) {
+        insert.run({
+          id: msg.id ?? nanoid(),
+          chat_id: msg.chat_id,
+          sender: msg.sender,
+          content: msg.content,
+          timestamp: msg.timestamp,
+          type: msg.type ?? "text",
+          raw: msg.raw ?? null
         });
-    })(e);
+      }
+    });
+    runAll(messages);
   }
-  findByChatId(e, t = 1e3, s = 0) {
+  findByChatId(chatId, limit = 1e3, offset = 0) {
     return this.db.prepare(`
       SELECT * FROM messages
       WHERE chat_id = ?
       ORDER BY timestamp ASC
       LIMIT ? OFFSET ?
-    `).all(e, t, s);
+    `).all(chatId, limit, offset);
   }
-  countByChatId(e) {
-    return this.db.prepare(
+  countByChatId(chatId) {
+    const row = this.db.prepare(
       "SELECT COUNT(*) as count FROM messages WHERE chat_id = ?"
-    ).get(e).count;
+    ).get(chatId);
+    return row.count;
   }
   /**
    * Returns unique sender names for a given chat, ordered by message count.
    */
-  getParticipants(e) {
-    return this.db.prepare(`
+  getParticipants(chatId) {
+    const rows = this.db.prepare(`
       SELECT DISTINCT sender
       FROM messages
       WHERE chat_id = ? AND type != 'system'
       GROUP BY sender
       ORDER BY COUNT(*) DESC
-    `).all(e).map((s) => s.sender);
+    `).all(chatId);
+    return rows.map((r) => r.sender);
   }
-  deleteByChatId(e) {
-    this.db.prepare("DELETE FROM messages WHERE chat_id = ?").run(e);
+  deleteByChatId(chatId) {
+    this.db.prepare("DELETE FROM messages WHERE chat_id = ?").run(chatId);
   }
   /**
    * Factual Search (Task 4.1): Uses FTS5 to find matches and extracts a
    * sliding window of surrounding messages (+/- windowSize).
    */
-  searchFactual(e, t = 15, s = 5) {
-    if (!e || e.length === 0) return [];
-    const n = e.map((c) => c.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, "").trim()).filter(Boolean);
-    if (n.length === 0) return [];
-    const r = n.map((c) => `"${c}"*`).join(" OR "), a = this.db.prepare(`
+  searchFactual(keywords, windowSize = 15, limit = 5) {
+    if (!keywords || keywords.length === 0) return [];
+    const cleanTokens = keywords.map((k) => k.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, "").trim()).filter(Boolean);
+    if (cleanTokens.length === 0) return [];
+    const matchQuery = cleanTokens.map((k) => `"${k}"*`).join(" OR ");
+    const pivots = this.db.prepare(`
       SELECT m.id, m.chat_id, m.timestamp 
       FROM messages_fts fts
       JOIN messages m ON fts.message_id = m.id
       WHERE messages_fts MATCH ?
       ORDER BY fts.rank
       LIMIT ?
-    `).all(r, s), o = [], l = this.db.prepare(`
+    `).all(matchQuery, limit);
+    const windows = [];
+    const fetchWindow = this.db.prepare(`
       SELECT * FROM (
         SELECT * FROM messages 
         WHERE chat_id = ? AND timestamp <= ? 
@@ -762,246 +885,317 @@ class se {
       )
       ORDER BY timestamp ASC
     `);
-    for (const c of a) {
-      const d = l.all(
-        c.chat_id,
-        c.timestamp,
-        t + 1,
-        c.chat_id,
-        c.timestamp,
-        t + 1
+    for (const p of pivots) {
+      const windowMsgs = fetchWindow.all(
+        p.chat_id,
+        p.timestamp,
+        windowSize + 1,
+        p.chat_id,
+        p.timestamp,
+        windowSize + 1
       );
-      o.push(d);
+      windows.push(windowMsgs);
     }
-    return o;
+    return windows;
   }
 }
-class z {
-  constructor(e) {
-    this.db = e;
+class SessionRepository {
+  constructor(db) {
+    this.db = db;
   }
   /**
    * Insert sessions and their FTS5 entries in a single transaction.
    */
-  insertBatch(e, t) {
-    if (e.length === 0 && t.length === 0) return;
-    const s = this.db.prepare(`
+  insertBatch(sessions, entities) {
+    if (sessions.length === 0 && entities.length === 0) return;
+    const insertSession = this.db.prepare(`
       INSERT INTO sessions (
         id, chat_id, start_time, end_time, message_count, summary
       ) VALUES (
         @id, @chat_id, @start_time, @end_time, @message_count, @summary
       )
-    `), n = this.db.prepare(`
+    `);
+    const insertSessionFts = this.db.prepare(`
       INSERT INTO sessions_fts (summary, session_id)
       VALUES (@summary, @session_id)
-    `), r = this.db.prepare(`
+    `);
+    const insertEntity = this.db.prepare(`
       INSERT INTO entities (
         id, session_id, name, normalized_name, type, action
       ) VALUES (
         @id, @session_id, @name, @normalized_name, @type, @action
       )
-    `), a = this.db.prepare(`
+    `);
+    const insertEntityFts = this.db.prepare(`
       INSERT INTO entities_fts (normalized_name, type, action, entity_id)
       VALUES (@normalized_name, @type, @action, @entity_id)
     `);
-    this.db.transaction((l, c) => {
-      for (const d of l) {
-        const E = d.id ?? f();
-        s.run({
-          id: E,
-          chat_id: d.chat_id,
-          start_time: d.start_time,
-          end_time: d.end_time,
-          message_count: d.message_count ?? 0,
-          summary: d.summary
-        }), n.run({ summary: d.summary, session_id: E });
+    const runAll = this.db.transaction((sessItems, entItems) => {
+      for (const sess of sessItems) {
+        const id = sess.id ?? nanoid();
+        insertSession.run({
+          id,
+          chat_id: sess.chat_id,
+          start_time: sess.start_time,
+          end_time: sess.end_time,
+          message_count: sess.message_count ?? 0,
+          summary: sess.summary
+        });
+        insertSessionFts.run({ summary: sess.summary, session_id: id });
       }
-      for (const d of c) {
-        const E = d.id ?? f();
-        r.run({
-          id: E,
-          session_id: d.session_id,
-          name: d.name,
-          normalized_name: d.normalized_name,
-          type: d.type,
-          action: d.action
-        }), a.run({
-          normalized_name: d.normalized_name,
-          type: d.type,
-          action: d.action,
-          entity_id: E
+      for (const ent of entItems) {
+        const id = ent.id ?? nanoid();
+        insertEntity.run({
+          id,
+          session_id: ent.session_id,
+          name: ent.name,
+          normalized_name: ent.normalized_name,
+          type: ent.type,
+          action: ent.action
+        });
+        insertEntityFts.run({
+          normalized_name: ent.normalized_name,
+          type: ent.type,
+          action: ent.action,
+          entity_id: id
         });
       }
-    })(e, t);
+    });
+    runAll(sessions, entities);
   }
   /**
    * Update a session with its NLP summary and insert its entities + FTS5 entries.
    * Used by the background NLP worker.
    */
-  updateSessionNLP(e, t, s) {
-    const n = this.db.prepare(`
+  updateSessionNLP(sessionId, summary, entities) {
+    const updateSession = this.db.prepare(`
       UPDATE sessions SET summary = @summary WHERE id = @id
-    `), r = this.db.prepare(`
+    `);
+    const updateSessionFts = this.db.prepare(`
       UPDATE sessions_fts SET summary = @summary WHERE session_id = @id
-    `), a = this.db.prepare(`
+    `);
+    const insertEntity = this.db.prepare(`
       INSERT INTO entities (
         id, session_id, name, normalized_name, type, action
       ) VALUES (
         @id, @session_id, @name, @normalized_name, @type, @action
       )
-    `), o = this.db.prepare(`
+    `);
+    const insertEntityFts = this.db.prepare(`
       INSERT INTO entities_fts (normalized_name, type, action, entity_id)
       VALUES (@normalized_name, @type, @action, @entity_id)
     `);
-    this.db.transaction(() => {
-      n.run({ summary: t, id: e }), r.run({ summary: t, id: e });
-      for (const c of s) {
-        const d = c.id ?? f();
-        a.run({
-          id: d,
-          session_id: c.session_id,
-          name: c.name,
-          normalized_name: c.normalized_name,
-          type: c.type,
-          action: c.action
-        }), o.run({
-          normalized_name: c.normalized_name,
-          type: c.type,
-          action: c.action,
-          entity_id: d
+    const runAll = this.db.transaction(() => {
+      updateSession.run({ summary, id: sessionId });
+      updateSessionFts.run({ summary, id: sessionId });
+      for (const ent of entities) {
+        const id = ent.id ?? nanoid();
+        insertEntity.run({
+          id,
+          session_id: ent.session_id,
+          name: ent.name,
+          normalized_name: ent.normalized_name,
+          type: ent.type,
+          action: ent.action
+        });
+        insertEntityFts.run({
+          normalized_name: ent.normalized_name,
+          type: ent.type,
+          action: ent.action,
+          entity_id: id
         });
       }
-    })();
+    });
+    runAll();
   }
-  findByChatId(e) {
-    return this.db.prepare(`
+  findByChatId(chatId) {
+    const rows = this.db.prepare(`
       SELECT * FROM sessions
       WHERE chat_id = ?
       ORDER BY start_time ASC
-    `).all(e);
+    `).all(chatId);
+    return rows;
   }
-  findEntitiesByChatId(e) {
-    return this.db.prepare(`
+  findEntitiesByChatId(chatId) {
+    const rows = this.db.prepare(`
       SELECT e.* FROM entities e
       JOIN sessions s ON s.id = e.session_id
       WHERE s.chat_id = ?
       ORDER BY e.created_at ASC
-    `).all(e);
+    `).all(chatId);
+    return rows;
   }
-  findById(e) {
-    return this.db.prepare(
+  findById(id) {
+    const row = this.db.prepare(
       "SELECT * FROM sessions WHERE id = ?"
-    ).get(e) || null;
+    ).get(id);
+    return row || null;
   }
-  deleteByChatId(e) {
-    const t = this.db.prepare(
+  deleteByChatId(chatId) {
+    const sessionIds = this.db.prepare(
       "SELECT id FROM sessions WHERE chat_id = ?"
-    ).all(e);
-    if (t.length === 0)
+    ).all(chatId);
+    if (sessionIds.length === 0) {
       return;
-    const s = this.db.prepare("DELETE FROM sessions WHERE chat_id = ?"), n = this.db.prepare("DELETE FROM sessions_fts WHERE session_id = ?"), r = this.db.prepare(
+    }
+    const deleteSessions = this.db.prepare("DELETE FROM sessions WHERE chat_id = ?");
+    const deleteSessionFts = this.db.prepare("DELETE FROM sessions_fts WHERE session_id = ?");
+    const deleteEntityFts = this.db.prepare(
       "DELETE FROM entities_fts WHERE entity_id IN (SELECT id FROM entities WHERE session_id = ?)"
     );
-    this.db.transaction(() => {
-      for (const { id: o } of t)
-        r.run(o), n.run(o);
-      s.run(e);
-    })();
+    const runAll = this.db.transaction(() => {
+      for (const { id } of sessionIds) {
+        deleteEntityFts.run(id);
+        deleteSessionFts.run(id);
+      }
+      deleteSessions.run(chatId);
+    });
+    runAll();
   }
-  countByChatId(e) {
-    return this.db.prepare(
+  countByChatId(chatId) {
+    const row = this.db.prepare(
       "SELECT COUNT(*) as count FROM sessions WHERE chat_id = ?"
-    ).get(e).count;
+    ).get(chatId);
+    return row.count;
   }
-  searchNarrative(e, t = 5, s) {
-    if (!e || e.length === 0) return [];
-    if (e.includes("#RECENT#")) {
-      let l = "SELECT * FROM sessions";
-      const c = [], d = [];
-      return s != null && s.dateFrom && (d.push("start_time >= ?"), c.push(s.dateFrom)), s != null && s.dateTo && (d.push("end_time <= ?"), c.push(s.dateTo)), d.length > 0 && (l += " WHERE " + d.join(" AND ")), l += " ORDER BY start_time DESC LIMIT ?", c.push(t), this.db.prepare(l).all(...c).reverse();
+  searchNarrative(keywords, limit = 5, options) {
+    if (!keywords || keywords.length === 0) return [];
+    if (keywords.includes("#RECENT#")) {
+      let q = `SELECT * FROM sessions`;
+      const p = [];
+      const clauses = [];
+      if (options == null ? void 0 : options.dateFrom) {
+        clauses.push(`start_time >= ?`);
+        p.push(options.dateFrom);
+      }
+      if (options == null ? void 0 : options.dateTo) {
+        clauses.push(`end_time <= ?`);
+        p.push(options.dateTo);
+      }
+      if (clauses.length > 0) {
+        q += ` WHERE ` + clauses.join(" AND ");
+      }
+      q += ` ORDER BY start_time DESC LIMIT ?`;
+      p.push(limit);
+      const rows = this.db.prepare(q).all(...p);
+      return rows.reverse();
     }
-    const n = e.map((l) => l.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ]/g, "").trim()).filter(Boolean);
-    if (n.length === 0) return [];
-    const r = n.map((l) => `"${l}"*`).join(" OR ");
-    let a = `
+    const cleanTokens = keywords.map((k) => k.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ]/g, "").trim()).filter(Boolean);
+    if (cleanTokens.length === 0) return [];
+    const matchQuery = cleanTokens.map((k) => `"${k}"*`).join(" OR ");
+    let query = `
       SELECT s.*
       FROM sessions_fts fts
       JOIN sessions s ON fts.session_id = s.id
       WHERE sessions_fts MATCH ?
     `;
-    const o = [r];
-    return s != null && s.dateFrom && (a += " AND s.start_time >= ?", o.push(s.dateFrom)), s != null && s.dateTo && (a += " AND s.end_time <= ?", o.push(s.dateTo)), a += " ORDER BY fts.rank LIMIT ?", o.push(t), this.db.prepare(a).all(...o);
+    const params = [matchQuery];
+    if (options == null ? void 0 : options.dateFrom) {
+      query += ` AND s.start_time >= ?`;
+      params.push(options.dateFrom);
+    }
+    if (options == null ? void 0 : options.dateTo) {
+      query += ` AND s.end_time <= ?`;
+      params.push(options.dateTo);
+    }
+    query += ` ORDER BY fts.rank LIMIT ?`;
+    params.push(limit);
+    return this.db.prepare(query).all(...params);
   }
-  searchAggregation(e, t = 10, s) {
-    if (!e || e.length === 0) return [];
-    const n = e.map((l) => l.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, "").trim()).filter(Boolean);
-    if (n.length === 0) return [];
-    const r = n.map((l) => `"${l}"*`).join(" OR ");
-    let a = `
+  searchAggregation(keywords, limit = 10, options) {
+    if (!keywords || keywords.length === 0) return [];
+    const cleanTokens = keywords.map((k) => k.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, "").trim()).filter(Boolean);
+    if (cleanTokens.length === 0) return [];
+    const matchQuery = cleanTokens.map((k) => `"${k}"*`).join(" OR ");
+    let query = `
       SELECT e.normalized_name as name, e.type, COUNT(*) as count
       FROM entities_fts fts
       JOIN entities e ON fts.entity_id = e.id
       JOIN sessions s ON e.session_id = s.id
       WHERE entities_fts MATCH ?
     `;
-    const o = [r];
-    return s != null && s.dateFrom && (a += " AND s.start_time >= ?", o.push(s.dateFrom)), s != null && s.dateTo && (a += " AND s.end_time <= ?", o.push(s.dateTo)), a += " GROUP BY e.normalized_name, e.type ORDER BY count DESC LIMIT ?", o.push(t), this.db.prepare(a).all(...o);
+    const params = [matchQuery];
+    if (options == null ? void 0 : options.dateFrom) {
+      query += ` AND s.start_time >= ?`;
+      params.push(options.dateFrom);
+    }
+    if (options == null ? void 0 : options.dateTo) {
+      query += ` AND s.end_time <= ?`;
+      params.push(options.dateTo);
+    }
+    query += ` GROUP BY e.normalized_name, e.type ORDER BY count DESC LIMIT ?`;
+    params.push(limit);
+    return this.db.prepare(query).all(...params);
   }
 }
-function ut() {
-  g.handle("chats:list", async () => {
-    const i = N.getInstance();
-    return new B(i).findAll();
-  }), g.handle("chats:delete", async (i, e) => {
-    const t = N.getInstance();
-    t.transaction(() => {
-      const n = new se(t), r = new z(t), a = new B(t);
-      r.deleteByChatId(e), n.deleteByChatId(e), a.delete(e);
-    })();
+function registerChatHandlers() {
+  ipcMain.handle("chats:list", async () => {
+    const db = DatabaseService.getInstance();
+    const repo = new ChatRepository(db);
+    return repo.findAll();
+  });
+  ipcMain.handle("chats:delete", async (_event, chatId) => {
+    const db = DatabaseService.getInstance();
+    const deleteOp = db.transaction(() => {
+      const msgRepo = new MessageRepository(db);
+      const sessionRepo = new SessionRepository(db);
+      const chatRepo = new ChatRepository(db);
+      sessionRepo.deleteByChatId(chatId);
+      msgRepo.deleteByChatId(chatId);
+      chatRepo.delete(chatId);
+    });
+    deleteOp();
   });
 }
-class Y {
-  constructor(e) {
-    this.db = e;
+class PersonRepository {
+  constructor(db) {
+    this.db = db;
   }
   /**
    * Creates a new person and associates their first alias.
    * Returns the newly created person ID.
    */
-  createPersonWithAlias(e, t, s) {
-    const n = f(), r = this.db.prepare(`
+  createPersonWithAlias(name, alias, color) {
+    const personId = nanoid();
+    const insertPerson = this.db.prepare(`
       INSERT INTO people (id, name, color) VALUES (@id, @name, @color)
-    `), a = this.db.prepare(`
+    `);
+    const insertAlias = this.db.prepare(`
       INSERT INTO person_aliases (person_id, alias) VALUES (@person_id, @alias)
     `);
-    return this.db.transaction(() => {
-      r.run({ id: n, name: e, color: s }), a.run({ person_id: n, alias: t });
-    })(), n;
+    const runAll = this.db.transaction(() => {
+      insertPerson.run({ id: personId, name, color });
+      insertAlias.run({ person_id: personId, alias });
+    });
+    runAll();
+    return personId;
   }
   /**
    * Links a person to a session as a mention.
    */
-  linkMention(e, t, s) {
-    this.db.prepare(`
+  linkMention(sessionId, personId, context) {
+    const stmt = this.db.prepare(`
       INSERT OR IGNORE INTO person_mentions (session_id, person_id, context)
       VALUES (@session_id, @person_id, @context)
-    `).run({ session_id: e, person_id: t, context: s });
+    `);
+    stmt.run({ session_id: sessionId, person_id: personId, context });
   }
   /**
    * Searches for a person by matching an alias using FTS5.
    */
-  findProbableMatch(e) {
-    const t = e.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, "").trim();
-    if (!t) return [];
-    const s = `
+  findProbableMatch(alias) {
+    const cleanAlias = alias.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿ ]/g, "").trim();
+    if (!cleanAlias) return [];
+    const query = `
       SELECT p.*
       FROM person_aliases_fts fts
       JOIN person_aliases pa ON fts.person_id = pa.person_id AND fts.alias = pa.alias
       JOIN people p ON pa.person_id = p.id
       WHERE person_aliases_fts MATCH ?
       ORDER BY fts.rank LIMIT 5
-    `, n = `"${t}"*`;
-    return this.db.prepare(s).all(n);
+    `;
+    const matchQuery = `"${cleanAlias}"*`;
+    return this.db.prepare(query).all(matchQuery);
   }
   /**
    * Returns all person relations.
@@ -1020,7 +1214,7 @@ class Y {
     `).all();
   }
 }
-const Tt = {
+const ANDROID_BR = {
   id: "android_br",
   regex: /^(\d{2}\/\d{2}\/\d{4}) (\d{2}:\d{2}) - ([^:]+): (.*)$/,
   format: {
@@ -1029,11 +1223,12 @@ const Tt = {
     locale: "pt-BR",
     dateFormat: "DD/MM/YYYY",
     timeFormat: "24h",
-    hasSeconds: !1,
-    hasBrackets: !1
+    hasSeconds: false,
+    hasBrackets: false
   },
   groups: { date: 1, time: 2, sender: 3, content: 4 }
-}, ht = {
+};
+const ANDROID_BR_COMMA = {
   id: "android_br_comma",
   regex: /^(\d{2}\/\d{2}\/\d{4}), (\d{2}:\d{2}) - ([^:]+): (.*)$/,
   format: {
@@ -1042,11 +1237,12 @@ const Tt = {
     locale: "pt-PT",
     dateFormat: "DD/MM/YYYY",
     timeFormat: "24h",
-    hasSeconds: !1,
-    hasBrackets: !1
+    hasSeconds: false,
+    hasBrackets: false
   },
   groups: { date: 1, time: 2, sender: 3, content: 4 }
-}, gt = {
+};
+const ANDROID_EN = {
   id: "android_en",
   regex: /^(\d{1,2}\/\d{1,2}\/\d{2,4}), (\d{1,2}:\d{2} [AP]M) - ([^:]+): (.*)$/,
   format: {
@@ -1055,11 +1251,12 @@ const Tt = {
     locale: "en-US",
     dateFormat: "M/D/YY",
     timeFormat: "12h",
-    hasSeconds: !1,
-    hasBrackets: !1
+    hasSeconds: false,
+    hasBrackets: false
   },
   groups: { date: 1, time: 2, sender: 3, content: 4 }
-}, _t = {
+};
+const IOS_EN = {
   id: "ios_en",
   regex: /^\[(\d{1,2}\/\d{1,2}\/\d{2,4}), (\d{1,2}:\d{2}:\d{2} [AP]M)\] ([^:]+): (.*)$/,
   format: {
@@ -1068,16 +1265,18 @@ const Tt = {
     locale: "en-US",
     dateFormat: "M/D/YY",
     timeFormat: "12h",
-    hasSeconds: !0,
-    hasBrackets: !0
+    hasSeconds: true,
+    hasBrackets: true
   },
   groups: { date: 1, time: 2, sender: 3, content: 4 }
-}, K = [
-  Tt,
-  ht,
-  gt,
-  _t
-], ft = [
+};
+const ALL_PATTERNS = [
+  ANDROID_BR,
+  ANDROID_BR_COMMA,
+  ANDROID_EN,
+  IOS_EN
+];
+const SYSTEM_PATTERNS = [
   /criptografia de ponta/i,
   /end-to-end encrypted/i,
   /adicionou/i,
@@ -1098,7 +1297,8 @@ const Tt = {
   /removed\s+\+?\d/i,
   /security code changed/i,
   /código de segurança mudou/i
-], Nt = [
+];
+const MEDIA_PATTERNS = [
   /<Mídia oculta>/i,
   /<Media omitted>/i,
   /\.(jpg|jpeg|png|gif|webp|mp4|opus|ogg|pdf|docx?)\s*\(arquivo anexado\)/i,
@@ -1110,148 +1310,185 @@ const Tt = {
   /sticker omitted/i,
   /document omitted/i,
   /GIF omitted/i
-], It = 20;
-async function St(i) {
-  const e = await Ot(i, It);
-  return Rt(e);
+];
+const SAMPLE_LINE_COUNT = 20;
+async function detectFormatFromFile(filePath) {
+  const sampleLines = await readSampleLines(filePath, SAMPLE_LINE_COUNT);
+  return detectFormatFromLines(sampleLines);
 }
-function Rt(i) {
-  for (const e of i) {
-    const t = e.trim();
-    if (t) {
-      for (const s of K)
-        if (s.regex.test(t))
-          return s.format;
+function detectFormatFromLines(lines) {
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    for (const pattern of ALL_PATTERNS) {
+      if (pattern.regex.test(trimmed)) {
+        return pattern.format;
+      }
     }
   }
   throw new Error(
-    `WhatsApp format not recognized. Tried ${K.length} patterns on ${i.length} sample lines.`
+    `WhatsApp format not recognized. Tried ${ALL_PATTERNS.length} patterns on ${lines.length} sample lines.`
   );
 }
-function Lt(i) {
-  const e = K.find((t) => t.id === i);
-  if (!e)
-    throw new Error(`No pattern registered for format ID: ${i}`);
-  return e;
+function getPatternById(formatId) {
+  const pattern = ALL_PATTERNS.find((p) => p.id === formatId);
+  if (!pattern) {
+    throw new Error(`No pattern registered for format ID: ${formatId}`);
+  }
+  return pattern;
 }
-async function Ot(i, e) {
-  const t = [], s = Se({
-    input: te(i, { encoding: "utf-8" }),
-    crlfDelay: 1 / 0
+async function readSampleLines(filePath, count) {
+  const lines = [];
+  const rl = createInterface({
+    input: createReadStream(filePath, { encoding: "utf-8" }),
+    crlfDelay: Infinity
   });
-  for await (const n of s)
-    if (t.push(n), t.length >= e) {
-      s.close();
+  for await (const line of rl) {
+    lines.push(line);
+    if (lines.length >= count) {
+      rl.close();
       break;
     }
-  return t;
+  }
+  return lines;
 }
-class At {
+class WhatsAppParser {
   /**
    * Parse a WhatsApp export .txt file using streaming (memory-efficient).
    */
-  async parse(e) {
-    let t;
+  async parse(filePath) {
+    let format;
     try {
-      t = await St(e);
-    } catch (E) {
+      format = await detectFormatFromFile(filePath);
+    } catch (err) {
       throw new Error(
-        `Failed to detect WhatsApp format: ${E instanceof Error ? E.message : String(E)}`
+        `Failed to detect WhatsApp format: ${err instanceof Error ? err.message : String(err)}`
       );
     }
-    const s = Lt(t.id), n = [], r = [];
-    let a = null, o = 0;
-    const l = Se({
-      input: te(e, { encoding: "utf-8" }),
-      crlfDelay: 1 / 0
+    const pattern = getPatternById(format.id);
+    const messages = [];
+    const errors = [];
+    let currentMessage = null;
+    let lineNumber = 0;
+    const rl = createInterface({
+      input: createReadStream(filePath, { encoding: "utf-8" }),
+      crlfDelay: Infinity
     });
-    for await (const E of l) {
-      o++;
-      const p = o === 1 ? E.replace(/^\uFEFF/, "") : E, _ = s.regex.exec(p);
-      if (_) {
-        a && he(a) && n.push(ge(a));
-        const S = _[s.groups.date], h = _[s.groups.time];
-        let L;
+    for await (const line of rl) {
+      lineNumber++;
+      const cleanLine = lineNumber === 1 ? line.replace(/^\uFEFF/, "") : line;
+      const match = pattern.regex.exec(cleanLine);
+      if (match) {
+        if (currentMessage && isComplete(currentMessage)) {
+          messages.push(finalizeMessage(currentMessage));
+        }
+        const rawDate = match[pattern.groups.date];
+        const rawTime = match[pattern.groups.time];
+        let timestamp;
         try {
-          L = yt(S, h, t);
+          timestamp = parseTimestamp(rawDate, rawTime, format);
         } catch {
-          r.push({ line: o, content: p, reason: "invalid_timestamp" }), a = null;
+          errors.push({ line: lineNumber, content: cleanLine, reason: "invalid_timestamp" });
+          currentMessage = null;
           continue;
         }
-        const O = _[s.groups.content] ?? "", M = _[s.groups.sender].trim();
-        a = {
-          timestamp: L,
-          sender: M,
-          content: O,
-          type: Re(O, M),
-          raw: p,
-          lineNumber: o
+        const rawContent = match[pattern.groups.content] ?? "";
+        const sender = match[pattern.groups.sender].trim();
+        currentMessage = {
+          timestamp,
+          sender,
+          content: rawContent,
+          type: detectMessageType(rawContent, sender),
+          raw: cleanLine,
+          lineNumber
         };
-      } else a && p.trim() ? (a.content = (a.content ?? "") + `
-` + p, a.raw = (a.raw ?? "") + `
-` + p) : p.trim() && !a && r.push({ line: o, content: p, reason: "orphan_line" });
+      } else if (currentMessage && cleanLine.trim()) {
+        currentMessage.content = (currentMessage.content ?? "") + "\n" + cleanLine;
+        currentMessage.raw = (currentMessage.raw ?? "") + "\n" + cleanLine;
+      } else if (cleanLine.trim() && !currentMessage) {
+        errors.push({ line: lineNumber, content: cleanLine, reason: "orphan_line" });
+      }
     }
-    a && he(a) && n.push(ge(a));
-    const c = [...new Set(n.map((E) => E.sender))], d = {
-      totalLines: o,
-      totalMessages: n.length,
-      errorCount: r.length,
-      participants: c,
-      firstTimestamp: n.length > 0 ? n[0].timestamp : null,
-      lastTimestamp: n.length > 0 ? n[n.length - 1].timestamp : null
+    if (currentMessage && isComplete(currentMessage)) {
+      messages.push(finalizeMessage(currentMessage));
+    }
+    const participants = [...new Set(messages.map((m) => m.sender))];
+    const stats = {
+      totalLines: lineNumber,
+      totalMessages: messages.length,
+      errorCount: errors.length,
+      participants,
+      firstTimestamp: messages.length > 0 ? messages[0].timestamp : null,
+      lastTimestamp: messages.length > 0 ? messages[messages.length - 1].timestamp : null
     };
-    return { messages: n, format: t, errors: r, stats: d };
+    return { messages, format, errors, stats };
   }
 }
-function he(i) {
-  return i.timestamp !== void 0 && i.sender !== void 0 && i.content !== void 0 && i.type !== void 0 && i.raw !== void 0 && i.lineNumber !== void 0;
+function isComplete(m) {
+  return m.timestamp !== void 0 && m.sender !== void 0 && m.content !== void 0 && m.type !== void 0 && m.raw !== void 0 && m.lineNumber !== void 0;
 }
-function ge(i) {
+function finalizeMessage(m) {
   return {
-    timestamp: i.timestamp,
-    sender: i.sender,
-    content: i.content.trim(),
-    type: Re(i.content.trim(), i.sender),
-    raw: i.raw,
-    lineNumber: i.lineNumber
+    timestamp: m.timestamp,
+    sender: m.sender,
+    content: m.content.trim(),
+    type: detectMessageType(m.content.trim(), m.sender),
+    raw: m.raw,
+    lineNumber: m.lineNumber
   };
 }
-function Re(i, e) {
-  const t = i.trim();
-  for (const s of Nt)
-    if (s.test(t)) return "media";
-  for (const s of ft)
-    if (s.test(t)) return "system";
-  return !e || e.trim() === "" ? "system" : "text";
-}
-function yt(i, e, t) {
-  let s, n, r;
-  if (t.locale === "pt-BR" || t.locale === "pt-PT") {
-    const [c, d, E] = i.split("/").map(Number);
-    s = c, n = d, r = E;
-  } else if (t.locale === "en-US") {
-    const [c, d, E] = i.split("/").map(Number);
-    n = c, s = d, r = E;
-  } else
-    [s, n, r] = i.split(/[\/\.\-]/).map(Number);
-  r < 100 && (r += r < 70 ? 2e3 : 1900);
-  let a, o;
-  if (t.timeFormat === "12h") {
-    const c = /PM/i.test(e), E = e.replace(/\s*[AP]M/i, "").split(":").map(Number);
-    a = E[0], o = E[1], c && a !== 12 && (a += 12), !c && a === 12 && (a = 0);
-  } else {
-    const c = e.split(":").map(Number);
-    a = c[0], o = c[1];
+function detectMessageType(content, sender) {
+  const trimmed = content.trim();
+  for (const pattern of MEDIA_PATTERNS) {
+    if (pattern.test(trimmed)) return "media";
   }
-  const l = Date.UTC(r, n - 1, s, a, o) / 1e3;
-  if (isNaN(l)) throw new Error(`Invalid timestamp: ${i} ${e}`);
-  return l;
+  for (const pattern of SYSTEM_PATTERNS) {
+    if (pattern.test(trimmed)) return "system";
+  }
+  if (!sender || sender.trim() === "") return "system";
+  return "text";
 }
-class wt {
-  constructor(e = 7200, t = 400) {
-    m(this, "maxGapSeconds");
-    m(this, "maxTokens");
-    this.maxGapSeconds = e, this.maxTokens = t;
+function parseTimestamp(date, time, format) {
+  let day, month, year;
+  if (format.locale === "pt-BR" || format.locale === "pt-PT") {
+    const [d, m, y] = date.split("/").map(Number);
+    day = d;
+    month = m;
+    year = y;
+  } else if (format.locale === "en-US") {
+    const [m, d, y] = date.split("/").map(Number);
+    month = m;
+    day = d;
+    year = y;
+  } else {
+    const parts = date.split(/[\/\.\-]/).map(Number);
+    [day, month, year] = parts;
+  }
+  if (year < 100) year += year < 70 ? 2e3 : 1900;
+  let hours, minutes;
+  if (format.timeFormat === "12h") {
+    const isPM = /PM/i.test(time);
+    const timePart = time.replace(/\s*[AP]M/i, "");
+    const parts = timePart.split(":").map(Number);
+    hours = parts[0];
+    minutes = parts[1];
+    if (isPM && hours !== 12) hours += 12;
+    if (!isPM && hours === 12) hours = 0;
+  } else {
+    const parts = time.split(":").map(Number);
+    hours = parts[0];
+    minutes = parts[1];
+  }
+  const ts = Date.UTC(year, month - 1, day, hours, minutes) / 1e3;
+  if (isNaN(ts)) throw new Error(`Invalid timestamp: ${date} ${time}`);
+  return ts;
+}
+class SessionEngine {
+  constructor(maxGapSeconds = 7200, maxTokens = 400) {
+    __publicField(this, "maxGapSeconds");
+    __publicField(this, "maxTokens");
+    this.maxGapSeconds = maxGapSeconds;
+    this.maxTokens = maxTokens;
   }
   /**
    * Groups an array of parsed messages into temporal sessions.
@@ -1259,29 +1496,45 @@ class wt {
    * or when the estimated token count exceeds `maxTokens` (adaptive chunking).
    * Messages are assumed to be pre-sorted by timestamp ascending.
    */
-  group(e) {
-    var l, c;
-    if (e.length === 0) return [];
-    const t = [...e].sort((d, E) => d.timestamp - E.timestamp), s = [];
-    let n = [t[0]], r = t[0].timestamp, a = t[0].timestamp, o = Math.ceil((((l = t[0].content) == null ? void 0 : l.length) || 0) / 4);
-    for (let d = 1; d < t.length; d++) {
-      const E = t[d], p = E.timestamp - a, _ = Math.ceil((((c = E.content) == null ? void 0 : c.length) || 0) / 4);
-      p > this.maxGapSeconds || o + _ > this.maxTokens ? (s.push({
-        messages: n,
-        start_time: r,
-        end_time: a,
-        message_count: n.length
-      }), n = [E], r = E.timestamp, o = _) : (n.push(E), o += _), a = E.timestamp;
+  group(messages) {
+    var _a, _b;
+    if (messages.length === 0) return [];
+    const sorted = [...messages].sort((a, b) => a.timestamp - b.timestamp);
+    const sessions = [];
+    let currentSessionMessages = [sorted[0]];
+    let currentStartTime = sorted[0].timestamp;
+    let lastMsgTime = sorted[0].timestamp;
+    let currentTokenEstimate = Math.ceil((((_a = sorted[0].content) == null ? void 0 : _a.length) || 0) / 4);
+    for (let i = 1; i < sorted.length; i++) {
+      const msg = sorted[i];
+      const gap = msg.timestamp - lastMsgTime;
+      const msgTokens = Math.ceil((((_b = msg.content) == null ? void 0 : _b.length) || 0) / 4);
+      if (gap > this.maxGapSeconds || currentTokenEstimate + msgTokens > this.maxTokens) {
+        sessions.push({
+          messages: currentSessionMessages,
+          start_time: currentStartTime,
+          end_time: lastMsgTime,
+          message_count: currentSessionMessages.length
+        });
+        currentSessionMessages = [msg];
+        currentStartTime = msg.timestamp;
+        currentTokenEstimate = msgTokens;
+      } else {
+        currentSessionMessages.push(msg);
+        currentTokenEstimate += msgTokens;
+      }
+      lastMsgTime = msg.timestamp;
     }
-    return s.push({
-      messages: n,
-      start_time: r,
-      end_time: a,
-      message_count: n.length
-    }), s;
+    sessions.push({
+      messages: currentSessionMessages,
+      start_time: currentStartTime,
+      end_time: lastMsgTime,
+      message_count: currentSessionMessages.length
+    });
+    return sessions;
   }
 }
-const P = {
+const MODEL_REGISTRY = {
   /**
    * nomic-embed-text-v1.5
    */
@@ -1328,14 +1581,20 @@ const P = {
     purpose: "generation",
     quantization: "Q4_K_M"
   }
-}, Dt = ["embedding", "worker", "brain"], w = class w {
+};
+const MODEL_DOWNLOAD_ORDER = ["embedding", "worker", "brain"];
+const _ModelManager = class _ModelManager {
   constructor() {
     /** Absolute path to the models directory in Electron's userData */
-    m(this, "modelsDir");
-    this.modelsDir = I.join(A.getPath("userData"), "models"), re.mkdirSync(this.modelsDir, { recursive: !0 });
+    __publicField(this, "modelsDir");
+    this.modelsDir = path.join(app.getPath("userData"), "models");
+    fs.mkdirSync(this.modelsDir, { recursive: true });
   }
   static getInstance() {
-    return w.instance || (w.instance = new w()), w.instance;
+    if (!_ModelManager.instance) {
+      _ModelManager.instance = new _ModelManager();
+    }
+    return _ModelManager.instance;
   }
   /**
    * Checks whether a model file is present locally without triggering a download.
@@ -1343,17 +1602,17 @@ const P = {
    * resolveModelFile with `download: false` returns the expected local path
    * without checking the network. We then verify the file actually exists on disk.
    */
-  async isAvailable(e) {
+  async isAvailable(key) {
     try {
-      const t = await V(P[e].uri, {
+      const modelPath = await resolveModelFile(MODEL_REGISTRY[key].uri, {
         directory: this.modelsDir,
-        download: !1,
+        download: false,
         // never trigger a download in a presence check
-        cli: !1
+        cli: false
       });
-      return re.existsSync(t);
+      return fs.existsSync(modelPath);
     } catch {
-      return !1;
+      return false;
     }
   }
   /**
@@ -1361,30 +1620,33 @@ const P = {
    * Runs availability checks in parallel for speed.
    */
   async checkAll() {
-    return await Promise.all(
-      Dt.map(async (t) => {
-        const s = P[t], n = await this.isAvailable(t);
-        let r;
-        if (n)
+    const statuses = await Promise.all(
+      MODEL_DOWNLOAD_ORDER.map(async (key) => {
+        const entry = MODEL_REGISTRY[key];
+        const available = await this.isAvailable(key);
+        let filePath;
+        if (available) {
           try {
-            r = await V(s.uri, {
+            filePath = await resolveModelFile(entry.uri, {
               directory: this.modelsDir,
-              download: !1,
-              cli: !1
+              download: false,
+              cli: false
             });
           } catch {
           }
+        }
         return {
-          key: t,
-          name: s.name,
-          quantization: s.quantization,
-          sizeEstimate: s.sizeEstimate,
-          purpose: s.purpose,
-          available: n,
-          filePath: r
+          key,
+          name: entry.name,
+          quantization: entry.quantization,
+          sizeEstimate: entry.sizeEstimate,
+          purpose: entry.purpose,
+          available,
+          filePath
         };
       })
     );
+    return statuses;
   }
   /**
    * Downloads a model with real-time progress reporting via the supplied callback.
@@ -1399,29 +1661,31 @@ const P = {
    * @param onProgress - Optional callback called with progress on each chunk
    * @returns          - Absolute path to the downloaded model entrypoint file
    */
-  async download(e, t) {
-    const s = P[e];
-    console.log(`[ModelManager] Starting download: ${s.name} (${s.uri})`);
-    const r = await (await xe({
-      modelUri: s.uri,
+  async download(key, onProgress) {
+    const entry = MODEL_REGISTRY[key];
+    console.log(`[ModelManager] Starting download: ${entry.name} (${entry.uri})`);
+    const downloader = await createModelDownloader({
+      modelUri: entry.uri,
       dirPath: this.modelsDir,
-      showCliProgress: !1,
-      onProgress: ({ totalSize: a, downloadedSize: o }) => {
-        if (t) {
-          const l = a ?? s.sizeEstimate;
-          t({
-            key: e,
-            name: s.name,
-            downloadedBytes: o,
-            totalBytes: l,
-            percent: l > 0 ? Math.round(o / l * 100) : 0,
+      showCliProgress: false,
+      onProgress: ({ totalSize, downloadedSize }) => {
+        if (onProgress) {
+          const total = totalSize ?? entry.sizeEstimate;
+          onProgress({
+            key,
+            name: entry.name,
+            downloadedBytes: downloadedSize,
+            totalBytes: total,
+            percent: total > 0 ? Math.round(downloadedSize / total * 100) : 0,
             speed: 0
             // ipull doesn't expose instantaneous speed in onProgress
           });
         }
       }
-    })).download();
-    return console.log(`[ModelManager] Download complete: ${s.name} → ${r}`), r;
+    });
+    const modelPath = await downloader.download();
+    console.log(`[ModelManager] Download complete: ${entry.name} → ${modelPath}`);
+    return modelPath;
   }
   /**
    * Resolves the absolute file path for a model.
@@ -1432,79 +1696,98 @@ const P = {
    * Intended for use inside services (EmbeddingService, LLMService) to get
    * the model path lazily at initialization time.
    */
-  async resolve(e) {
-    const t = P[e];
-    return V(t.uri, {
+  async resolve(key) {
+    const entry = MODEL_REGISTRY[key];
+    return resolveModelFile(entry.uri, {
       directory: this.modelsDir,
       download: "auto",
-      cli: !1
+      cli: false
     });
   }
 };
-m(w, "instance", null);
-let X = w;
-const kt = typeof __dirname < "u" ? __dirname : I.dirname(ee(import.meta.url)), D = class D {
+__publicField(_ModelManager, "instance", null);
+let ModelManager = _ModelManager;
+const _dirname$1 = typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
+const _WorkerProcess = class _WorkerProcess {
   constructor() {
-    m(this, "worker", null);
-    m(this, "pendingRequests", /* @__PURE__ */ new Map());
-    m(this, "initializationPromise", null);
-    m(this, "ready", !1);
+    __publicField(this, "worker", null);
+    __publicField(this, "pendingRequests", /* @__PURE__ */ new Map());
+    __publicField(this, "initializationPromise", null);
+    __publicField(this, "ready", false);
     // Basic Batch Queue (Will be expanded in 3.4)
-    m(this, "batchQueue", []);
-    m(this, "processingQueue", !1);
-    m(this, "currentModelKey", "worker");
+    __publicField(this, "batchQueue", []);
+    __publicField(this, "processingQueue", false);
+    __publicField(this, "currentModelKey", "worker");
   }
   static getInstance() {
-    return D.instance || (D.instance = new D()), D.instance;
+    if (!_WorkerProcess.instance) {
+      _WorkerProcess.instance = new _WorkerProcess();
+    }
+    return _WorkerProcess.instance;
   }
   async initialize() {
-    if (!this.ready) {
-      if (this.initializationPromise) return this.initializationPromise;
-      this.initializationPromise = new Promise(async (e, t) => {
-        try {
-          await this.startWorker("worker"), this.ready = !0, e();
-        } catch (s) {
-          console.warn("[WorkerProcess] Primary worker failed. Triggering fallback... Error:", s);
-          try {
-            await this.startWorker("worker_fallback"), this.currentModelKey = "worker_fallback", console.log("[WorkerProcess] Fallback to " + P.worker_fallback.name + " succeeded."), this.ready = !0, e();
-          } catch (n) {
-            console.error("[WorkerProcess] Fallback also failed:", n), this.initializationPromise = null, t(n);
-          }
-        }
-      });
+    if (this.ready) return;
+    if (this.initializationPromise) return this.initializationPromise;
+    this.initializationPromise = new Promise(async (resolve, reject) => {
       try {
-        await this.initializationPromise;
-      } finally {
-        this.initializationPromise = null;
+        await this.startWorker("worker");
+        this.ready = true;
+        resolve();
+      } catch (err) {
+        console.warn(`[WorkerProcess] Primary worker failed. Triggering fallback... Error:`, err);
+        try {
+          await this.startWorker("worker_fallback");
+          this.currentModelKey = "worker_fallback";
+          console.log("[WorkerProcess] Fallback to " + MODEL_REGISTRY.worker_fallback.name + " succeeded.");
+          this.ready = true;
+          resolve();
+        } catch (fbErr) {
+          console.error("[WorkerProcess] Fallback also failed:", fbErr);
+          this.initializationPromise = null;
+          reject(fbErr);
+        }
       }
+    });
+    try {
+      await this.initializationPromise;
+    } finally {
+      this.initializationPromise = null;
     }
   }
-  startWorker(e) {
-    return new Promise(async (t, s) => {
-      console.log(`[WorkerProcess] Resolving model path for: ${e}...`);
-      const n = await X.getInstance().resolve(e);
-      console.log(`[WorkerProcess] Forking Utility Process for ${e}...`);
-      const r = I.join(kt, "worker-worker.js");
-      this.worker = fe.fork(r, [], {
+  startWorker(modelKey) {
+    return new Promise(async (resolve, reject) => {
+      console.log(`[WorkerProcess] Resolving model path for: ${modelKey}...`);
+      const modelPath = await ModelManager.getInstance().resolve(modelKey);
+      console.log(`[WorkerProcess] Forking Utility Process for ${modelKey}...`);
+      const workerPath = path.join(_dirname$1, "worker-worker.js");
+      this.worker = utilityProcess.fork(workerPath, [], {
         stdio: "inherit"
-      }), this.worker.on("message", (o) => this.handleWorkerMessage(o)), this.worker.on("exit", (o) => {
-        console.warn(`[WorkerProcess] Utility process exited with code ${o}`), this.ready = !1, this.worker = null, this.rejectAllPending(new Error(`Worker exited unexpectedly with code ${o}`));
       });
-      const a = f();
-      this.pendingRequests.set(a, {
+      this.worker.on("message", (msg) => this.handleWorkerMessage(msg));
+      this.worker.on("exit", (code) => {
+        console.warn(`[WorkerProcess] Utility process exited with code ${code}`);
+        this.ready = false;
+        this.worker = null;
+        this.rejectAllPending(new Error(`Worker exited unexpectedly with code ${code}`));
+      });
+      const id = nanoid();
+      this.pendingRequests.set(id, {
         resolve: async () => {
-          console.log("[WorkerProcess] Initialized successfully. Running Day-0 test...");
+          console.log(`[WorkerProcess] Initialized successfully. Running Day-0 test...`);
           try {
-            await this.internalGenerate("test", { maxTokens: 5 }), t();
-          } catch (o) {
-            this.dispose(), s(o);
+            await this.internalGenerate("test", { maxTokens: 5 });
+            resolve();
+          } catch (e) {
+            this.dispose();
+            reject(e);
           }
         },
-        reject: s
-      }), this.worker.postMessage({
+        reject
+      });
+      this.worker.postMessage({
         type: "init",
-        id: a,
-        payload: { modelPath: n }
+        id,
+        payload: { modelPath }
       });
     });
   }
@@ -1514,14 +1797,18 @@ const kt = typeof __dirname < "u" ? __dirname : I.dirname(ee(import.meta.url)), 
   getFallbackStatus() {
     return this.currentModelKey === "worker_fallback";
   }
-  async generate(e, t) {
-    return this.generateStream(e, () => {
-    }, t);
+  async generate(prompt, options) {
+    return this.generateStream(prompt, () => {
+    }, options);
   }
   // Queue wrapper
-  async generateStream(e, t, s) {
-    return (!this.ready || !this.worker) && await this.initialize(), new Promise((n, r) => {
-      this.batchQueue.push({ prompt: e, options: s, resolve: n, reject: r, onToken: t }), this.processNextInQueue();
+  async generateStream(prompt, onToken, options) {
+    if (!this.ready || !this.worker) {
+      await this.initialize();
+    }
+    return new Promise((resolve, reject) => {
+      this.batchQueue.push({ prompt, options, resolve, reject, onToken });
+      this.processNextInQueue();
     });
   }
   /**
@@ -1532,35 +1819,40 @@ const kt = typeof __dirname < "u" ? __dirname : I.dirname(ee(import.meta.url)), 
    * Generates text via LLM and enforces valid JSON extraction with an aggressive retry loop.
    * Useful since smaller parameter models like LFM2.5-350M can drift out of grammar.
    */
-  async generateJson(e, t, s = 3) {
-    let n = null, r = e;
-    for (let a = 1; a <= s; a++)
+  async generateJson(prompt, options, maxRetries = 3) {
+    let lastError = null;
+    let currentPrompt = prompt;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const o = await this.generate(r, t);
-        return this.extractJson(o);
-      } catch (o) {
-        n = o, console.warn(`[WorkerProcess] JSON extraction failed (attempt ${a}/${s}):`, o.message), r = e + `
+        const rawResponse = await this.generate(currentPrompt, options);
+        return this.extractJson(rawResponse);
+      } catch (e) {
+        lastError = e;
+        console.warn(`[WorkerProcess] JSON extraction failed (attempt ${attempt}/${maxRetries}):`, e.message);
+        currentPrompt = prompt + `
 
-[SYSTEM FEEDBACK: Your previous response failed JSON parsing with error: ${o.message}. Please return strictly valid JSON without conversational wrapper text.]`;
+[SYSTEM FEEDBACK: Your previous response failed JSON parsing with error: ${e.message}. Please return strictly valid JSON without conversational wrapper text.]`;
       }
-    throw new Error(`[WorkerProcess] Failed to generate valid JSON after ${s} attempts. Last error: ${n == null ? void 0 : n.message}`);
+    }
+    throw new Error(`[WorkerProcess] Failed to generate valid JSON after ${maxRetries} attempts. Last error: ${lastError == null ? void 0 : lastError.message}`);
   }
   /**
    * Helper to strip markdown (e.g. \`\`\`json) and aggressively find the { ... } boundaries.
    */
-  extractJson(e) {
+  extractJson(text) {
     try {
-      return JSON.parse(e);
-    } catch {
+      return JSON.parse(text);
+    } catch (_) {
     }
-    let t = e.replace(/^```json/im, "").replace(/```$/im, "").trim();
-    const s = t.match(/\{.*\}/s) || t.match(/\[.*\]/s);
-    if (!s)
+    let cleaned = text.replace(/^```json/im, "").replace(/```$/im, "").trim();
+    const match = cleaned.match(/\{.*\}/s) || cleaned.match(/\[.*\]/s);
+    if (!match) {
       throw new Error("No JSON boundaries ({...} or [...]) found in response");
-    return JSON.parse(s[0]);
+    }
+    return JSON.parse(match[0]);
   }
-  async classifyQuery(e) {
-    const t = `You are a strict JSON classification tool. You analyze Portuguese queries to search chat logs.
+  async classifyQuery(query) {
+    const prompt = `You are a strict JSON classification tool. You analyze Portuguese queries to search chat logs.
 Output ONLY raw JSON.
 
 Intent rules:
@@ -1586,16 +1878,25 @@ Query: "o que rolou na semana passada?"
 Query: "qual a senha do wifi"
 {"intent": "factual", "keywords": ["senha", "wifi"], "dateRange": {"start": null, "end": null}}
 
-Query: "${e}"
-`, s = {
+Query: "${query}"
+`;
+    const options = {
       temperature: 0.05,
       maxTokens: 150,
       systemPrompt: "You are a headless JSON API. Respond only with valid JSON. Never output conversational text."
-    }, n = await this.generateJson(t, s, 3);
-    return ["factual", "aggregation", "narrative", "unknown"].includes(n.intent) || (n.intent = "factual"), (!n.keywords || !Array.isArray(n.keywords)) && (n.keywords = []), n;
+    };
+    const res = await this.generateJson(prompt, options, 3);
+    const validIntents = ["factual", "aggregation", "narrative", "unknown"];
+    if (!validIntents.includes(res.intent)) {
+      res.intent = "factual";
+    }
+    if (!res.keywords || !Array.isArray(res.keywords)) {
+      res.keywords = [];
+    }
+    return res;
   }
-  async expandKeywords(e) {
-    const t = `You are a linguistic expansion tool for Portuguese chat logs. Output ONLY raw JSON.
+  async expandKeywords(keywords) {
+    const prompt = `You are a linguistic expansion tool for Portuguese chat logs. Output ONLY raw JSON.
 Expand the keywords with exactly 3 common pt-BR synonyms, internet slang, or abbreviations. 
 Crucially: If a keyword is a Category/Class (like "jogos", "pessoas", "lugares", "topicos"), you MUST include its direct English translation (e.g. "game", "person", "place", "topic") so it matches our system's internal database classification schema.
 
@@ -1609,23 +1910,25 @@ Keywords: ["pessoas"]
 Keywords: ["risada", "engraçado"]
 {"expanded": ["kkk", "haha", "rsrs"]}
 
-Keywords: ${JSON.stringify(e)}
-`, s = {
+Keywords: ${JSON.stringify(keywords)}
+`;
+    const options = {
       temperature: 0.3,
       maxTokens: 100,
       systemPrompt: 'You are a headless JSON API. You MUST respond with exactly this JSON schema: {"expanded": ["str", "str"]}'
     };
     try {
-      const n = await this.generateJson(t, s, 2);
-      if (n.expanded && Array.isArray(n.expanded))
-        return Array.from(/* @__PURE__ */ new Set([...e, ...n.expanded]));
-    } catch (n) {
-      console.warn("[WorkerProcess] Failed to expand keywords", n);
+      const res = await this.generateJson(prompt, options, 2);
+      if (res.expanded && Array.isArray(res.expanded)) {
+        return Array.from(/* @__PURE__ */ new Set([...keywords, ...res.expanded]));
+      }
+    } catch (e) {
+      console.warn("[WorkerProcess] Failed to expand keywords", e);
     }
-    return e;
+    return keywords;
   }
-  async extractSessionEntities(e) {
-    const t = `You are a strict JSON extraction tool. Analyze this chat session and extract third-party mentions.
+  async extractSessionEntities(sessionText) {
+    const prompt = `You are a strict JSON extraction tool. Analyze this chat session and extract third-party mentions.
 Output ONLY raw JSON. Do not output markdown, explanations, or conversational text.
 
 Rules:
@@ -1647,21 +1950,26 @@ Schema:
 }
 
 Session Text:
-${e}
-`, s = {
+${sessionText}
+`;
+    const options = {
       temperature: 0.1,
       maxTokens: 500,
       systemPrompt: "You are a headless JSON API. You MUST respond with valid JSON matching the exact schema."
-    }, n = Date.now();
+    };
+    const startTime = Date.now();
     try {
-      const r = await this.generateJson(t, s, 3), a = Date.now() - n;
-      return console.log(`[WorkerProcess] extractSessionEntities completed in ${a}ms`), {
-        summary: r.summary || "Sessão extraída",
-        mentioned_entities: Array.isArray(r.mentioned_entities) ? r.mentioned_entities : []
+      const res = await this.generateJson(prompt, options, 3);
+      const duration = Date.now() - startTime;
+      console.log(`[WorkerProcess] extractSessionEntities completed in ${duration}ms`);
+      return {
+        summary: res.summary || "Sessão extraída",
+        mentioned_entities: Array.isArray(res.mentioned_entities) ? res.mentioned_entities : []
       };
-    } catch (r) {
-      const a = Date.now() - n;
-      return console.error(`[WorkerProcess] extractSessionEntities completely failed after ${a}ms:`, r.message), {
+    } catch (e) {
+      const duration = Date.now() - startTime;
+      console.error(`[WorkerProcess] extractSessionEntities completely failed after ${duration}ms:`, e.message);
+      return {
         summary: "Sessão extraída via fallback de erro",
         mentioned_entities: []
       };
@@ -1669,262 +1977,325 @@ ${e}
   }
   async processNextInQueue() {
     if (this.processingQueue || this.batchQueue.length === 0) return;
-    this.processingQueue = !0;
-    const e = this.batchQueue.shift();
+    this.processingQueue = true;
+    const task = this.batchQueue.shift();
     try {
-      const t = await this.internalGenerateStream(e.prompt, e.onToken || (() => {
-      }), e.options);
-      e.resolve(t);
-    } catch (t) {
-      e.reject(t);
+      const res = await this.internalGenerateStream(task.prompt, task.onToken || (() => {
+      }), task.options);
+      task.resolve(res);
+    } catch (e) {
+      task.reject(e);
     } finally {
-      this.processingQueue = !1, this.processNextInQueue();
+      this.processingQueue = false;
+      this.processNextInQueue();
     }
   }
-  async internalGenerate(e, t) {
-    return this.internalGenerateStream(e, () => {
-    }, t);
+  async internalGenerate(prompt, options) {
+    return this.internalGenerateStream(prompt, () => {
+    }, options);
   }
-  async internalGenerateStream(e, t, s) {
-    return new Promise((n, r) => {
-      const a = f();
-      this.pendingRequests.set(a, { resolve: n, reject: r, onToken: t }), this.worker.postMessage({
+  async internalGenerateStream(prompt, onToken, options) {
+    return new Promise((resolve, reject) => {
+      const id = nanoid();
+      this.pendingRequests.set(id, { resolve, reject, onToken });
+      this.worker.postMessage({
         type: "generate",
-        id: a,
-        payload: { prompt: e, options: s }
+        id,
+        payload: { prompt, options }
       });
     });
   }
   getModelInfo() {
     return {
-      modelName: P[this.currentModelKey].name,
+      modelName: MODEL_REGISTRY[this.currentModelKey].name,
       parameters: this.currentModelKey === "worker" ? "350M" : "270M"
     };
   }
   async dispose() {
-    this.worker && (console.log("[WorkerProcess] Disposing worker..."), this.worker.postMessage({ type: "dispose" }), await new Promise((e) => {
-      const t = setTimeout(() => {
-        this.worker && this.worker.kill(), e();
+    if (!this.worker) return;
+    console.log("[WorkerProcess] Disposing worker...");
+    this.worker.postMessage({ type: "dispose" });
+    await new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        if (this.worker) this.worker.kill();
+        resolve();
       }, 2e3);
       this.worker.once("exit", () => {
-        clearTimeout(t), e();
+        clearTimeout(timeout);
+        resolve();
       });
-    }), this.worker = null, this.ready = !1, this.rejectAllPending(new Error("WorkerProcess is disposing or shutting down")), this.initializationPromise = null);
+    });
+    this.worker = null;
+    this.ready = false;
+    this.rejectAllPending(new Error("WorkerProcess is disposing or shutting down"));
+    this.initializationPromise = null;
   }
-  handleWorkerMessage(e) {
-    const { type: t, id: s, error: n, token: r, text: a } = e;
-    if (!s || !this.pendingRequests.has(s)) {
-      t === "error" && console.error("[Worker Global Error]", n);
+  handleWorkerMessage(msg) {
+    const { type, id, error, token, text } = msg;
+    if (!id || !this.pendingRequests.has(id)) {
+      if (type === "error") {
+        console.error(`[Worker Global Error]`, error);
+      }
       return;
     }
-    const { resolve: o, reject: l, onToken: c } = this.pendingRequests.get(s);
-    switch (t) {
+    const { resolve, reject, onToken } = this.pendingRequests.get(id);
+    switch (type) {
       case "init-ready":
-        this.pendingRequests.delete(s), o();
+        this.pendingRequests.delete(id);
+        resolve();
         break;
       case "token":
-        c && r && c(r);
+        if (onToken && token) onToken(token);
         break;
       case "done":
-        this.pendingRequests.delete(s), o(a);
+        this.pendingRequests.delete(id);
+        resolve(text);
         break;
       case "error":
-        this.pendingRequests.delete(s), l(new Error(n));
+        this.pendingRequests.delete(id);
+        reject(new Error(error));
         break;
       default:
-        console.warn(`[WorkerProcess] Unrecognized message type '${t}'`);
+        console.warn(`[WorkerProcess] Unrecognized message type '${type}'`);
     }
   }
-  rejectAllPending(e) {
-    for (const [t, s] of this.pendingRequests.entries())
-      s.reject(e), this.pendingRequests.delete(t);
+  rejectAllPending(error) {
+    for (const [id, req] of this.pendingRequests.entries()) {
+      req.reject(error);
+      this.pendingRequests.delete(id);
+    }
   }
 };
-m(D, "instance", null);
-let v = D;
-const Le = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+__publicField(_WorkerProcess, "instance", null);
+let WorkerProcess = _WorkerProcess;
+const WorkerProcess$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
-  WorkerProcess: v
-}, Symbol.toStringTag, { value: "Module" })), k = class k {
+  WorkerProcess
+}, Symbol.toStringTag, { value: "Module" }));
+const _PendingMentionsManager = class _PendingMentionsManager {
   constructor() {
-    m(this, "queue", []);
+    __publicField(this, "queue", []);
   }
   static getInstance() {
-    return k.instance || (k.instance = new k()), k.instance;
+    if (!_PendingMentionsManager.instance) {
+      _PendingMentionsManager.instance = new _PendingMentionsManager();
+    }
+    return _PendingMentionsManager.instance;
   }
-  addMention(e, t, s) {
-    const n = {
-      id: f(),
-      sessionId: e,
-      alias: t,
-      context: s,
+  addMention(sessionId, alias, context) {
+    const mention = {
+      id: nanoid(),
+      sessionId,
+      alias,
+      context,
       timestamp: Date.now()
     };
-    return this.queue.push(n), n;
+    this.queue.push(mention);
+    return mention;
   }
   getPending() {
     return [...this.queue];
   }
-  getMentionById(e) {
-    return this.queue.find((t) => t.id === e);
+  getMentionById(id) {
+    return this.queue.find((m) => m.id === id);
   }
-  removeMention(e) {
-    this.queue = this.queue.filter((t) => t.id !== e);
+  removeMention(id) {
+    this.queue = this.queue.filter((m) => m.id !== id);
   }
   /**
    * If there are clones (same alias) of an approved/resolved mention, we can auto-resolve them too.
    * This method extracts all clones from the queue so they can be processed by the caller.
    */
-  extractClones(e) {
-    const t = e.trim().toLowerCase(), s = this.queue.filter((n) => n.alias.trim().toLowerCase() === t);
-    return this.queue = this.queue.filter((n) => n.alias.trim().toLowerCase() !== t), s;
+  extractClones(alias) {
+    const cleanAlias = alias.trim().toLowerCase();
+    const clones = this.queue.filter((m) => m.alias.trim().toLowerCase() === cleanAlias);
+    this.queue = this.queue.filter((m) => m.alias.trim().toLowerCase() !== cleanAlias);
+    return clones;
   }
   clear() {
     this.queue = [];
   }
 };
-m(k, "instance");
-let q = k;
-class Ct {
+__publicField(_PendingMentionsManager, "instance");
+let PendingMentionsManager = _PendingMentionsManager;
+class ChatImportService {
   constructor() {
-    m(this, "parser", new At());
-    m(this, "sessionEngine", new wt(7200));
+    __publicField(this, "parser", new WhatsAppParser());
+    __publicField(this, "sessionEngine", new SessionEngine(7200));
   }
   // > 2h gap
-  async import(e, t) {
-    const s = (r) => {
-      t == null || t.send("import:progress", r);
+  async import(filePath, sender) {
+    const emit = (progress) => {
+      sender == null ? void 0 : sender.send("import:progress", progress);
     };
-    let n;
+    let chatId;
     try {
-      s({ stage: "reading", percent: 5, label: "Lendo arquivo", detail: "Calculando hash..." });
-      const r = await Ft(e), a = N.getInstance(), o = new B(a);
-      if (o.existsByHash(r))
-        return { success: !1, duplicate: !0, error: "Arquivo já importado." };
-      const l = Ce(e).replace(/\.[^/.]+$/, "");
-      n = f(), s({ stage: "parsing", percent: 15, label: "Parseando mensagens", detail: "Lendo chat base..." });
-      const c = await this.parser.parse(e);
-      if (c.messages.length === 0)
-        return { success: !1, error: "Nenhuma mensagem encontrada." };
-      const d = c.messages.map((h) => ({
-        id: f(),
-        chat_id: n,
-        sender: h.sender,
-        content: h.content,
-        timestamp: h.timestamp,
-        type: h.type,
-        raw: h.raw
+      emit({ stage: "reading", percent: 5, label: "Lendo arquivo", detail: "Calculando hash..." });
+      const fileHash = await computeFileHash(filePath);
+      const db = DatabaseService.getInstance();
+      const chatRepo = new ChatRepository(db);
+      if (chatRepo.existsByHash(fileHash)) {
+        return { success: false, duplicate: true, error: "Arquivo já importado." };
+      }
+      const chatName = basename(filePath).replace(/\.[^/.]+$/, "");
+      chatId = nanoid();
+      emit({ stage: "parsing", percent: 15, label: "Parseando mensagens", detail: "Lendo chat base..." });
+      const parseResult = await this.parser.parse(filePath);
+      if (parseResult.messages.length === 0) {
+        return { success: false, error: "Nenhuma mensagem encontrada." };
+      }
+      const newMessages = parseResult.messages.map((m) => ({
+        id: nanoid(),
+        chat_id: chatId,
+        sender: m.sender,
+        content: m.content,
+        timestamp: m.timestamp,
+        type: m.type,
+        raw: m.raw
       }));
-      o.create({
-        id: n,
-        name: l,
+      chatRepo.create({
+        id: chatId,
+        name: chatName,
         source: "whatsapp",
-        file_hash: r,
-        participant_count: c.stats.participants.length,
-        message_count: c.messages.length,
-        first_message_at: c.stats.firstTimestamp ?? void 0,
-        last_message_at: c.stats.lastTimestamp ?? void 0
-      }), s({ stage: "fts_indexing", percent: 25, label: "Agrupando Sessões", detail: "Topologia Cronológica..." });
-      const E = this.sessionEngine.group(c.messages), p = [];
-      for (const h of E)
-        p.push({
-          id: f(),
-          chat_id: n,
-          start_time: h.start_time,
-          end_time: h.end_time,
-          message_count: h.message_count,
+        file_hash: fileHash,
+        participant_count: parseResult.stats.participants.length,
+        message_count: parseResult.messages.length,
+        first_message_at: parseResult.stats.firstTimestamp ?? void 0,
+        last_message_at: parseResult.stats.lastTimestamp ?? void 0
+      });
+      emit({ stage: "fts_indexing", percent: 25, label: "Agrupando Sessões", detail: "Topologia Cronológica..." });
+      const rawSessions = this.sessionEngine.group(parseResult.messages);
+      const newSessions = [];
+      for (const rawSess of rawSessions) {
+        newSessions.push({
+          id: nanoid(),
+          chat_id: chatId,
+          start_time: rawSess.start_time,
+          end_time: rawSess.end_time,
+          message_count: rawSess.message_count,
           summary: "Processando IA em background..."
           // Temporary summary
         });
-      return s({ stage: "fts_indexing", percent: 40, label: "Salvando no banco", detail: "Persistindo histórico nativo e Indexando FTS5..." }), new se(a).insertBatch(d), new z(a).insertBatch(p, []), this.runBackgroundNLP(n, E, p, t).catch((h) => {
-        console.error("[Background NLP Error]", h);
-      }), {
-        success: !0,
-        chatId: n,
-        chatName: l,
-        messageCount: c.messages.length,
-        chunkCount: p.length
+      }
+      emit({ stage: "fts_indexing", percent: 40, label: "Salvando no banco", detail: "Persistindo histórico nativo e Indexando FTS5..." });
+      const messageRepo = new MessageRepository(db);
+      messageRepo.insertBatch(newMessages);
+      const sessionRepo = new SessionRepository(db);
+      sessionRepo.insertBatch(newSessions, []);
+      this.runBackgroundNLP(chatId, rawSessions, newSessions, sender).catch((err) => {
+        console.error("[Background NLP Error]", err);
+      });
+      return {
+        success: true,
+        chatId,
+        chatName,
+        messageCount: parseResult.messages.length,
+        chunkCount: newSessions.length
         // total sessions
       };
-    } catch (r) {
-      if (n)
+    } catch (err) {
+      if (chatId) {
         try {
-          const o = N.getInstance();
-          new B(o).delete(n);
-        } catch {
+          const db = DatabaseService.getInstance();
+          new ChatRepository(db).delete(chatId);
+        } catch (e) {
         }
-      const a = r instanceof Error ? r.message : String(r);
-      return console.error("[ChatImportService] Import failed:", a), s({ stage: "error", percent: 0, label: "Erro na importação", detail: a }), { success: !1, error: a };
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[ChatImportService] Import failed:", message);
+      emit({ stage: "error", percent: 0, label: "Erro na importação", detail: message });
+      return { success: false, error: message };
     }
   }
   /**
    * Background process to extract summaries and entities via Worker
    */
-  async runBackgroundNLP(e, t, s, n) {
-    const r = (a) => {
-      n == null || n.send("import:progress", a);
+  async runBackgroundNLP(chatId, rawSessions, dbSessions, sender) {
+    const emit = (progress) => {
+      sender == null ? void 0 : sender.send("import:progress", progress);
     };
     try {
-      r({ stage: "nlp_summaries", percent: 20, label: "Extração NLP Iniciada", detail: `Processando ${t.length} sessões...`, chatId: e });
-      const a = v.getInstance();
-      await a.initialize();
-      const o = N.getInstance(), l = new z(o);
-      let c = 0;
-      for (let d = 0; d < t.length; d++) {
-        const E = t[d], p = s[d], _ = E.messages.map((u) => `[${new Date(u.timestamp * 1e3).toISOString()}] ${u.sender}: ${u.content}`).join(`
-`);
-        let S = "Sessão concluída (sem detalhes extraídos)", h = [];
+      emit({ stage: "nlp_summaries", percent: 20, label: "Extração NLP Iniciada", detail: `Processando ${rawSessions.length} sessões...`, chatId });
+      const worker = WorkerProcess.getInstance();
+      await worker.initialize();
+      const db = DatabaseService.getInstance();
+      const sessionRepo = new SessionRepository(db);
+      let processed = 0;
+      for (let i = 0; i < rawSessions.length; i++) {
+        const rawSess = rawSessions[i];
+        const dbSess = dbSessions[i];
+        const convoContext = rawSess.messages.map((m) => `[${new Date(m.timestamp * 1e3).toISOString()}] ${m.sender}: ${m.content}`).join("\n");
+        let summary = "Sessão concluída (sem detalhes extraídos)";
+        let extractedEntities = [];
         try {
-          const u = await a.extractSessionEntities(_);
-          u.summary && (S = u.summary), u.mentioned_entities && (h = u.mentioned_entities);
-        } catch (u) {
-          console.warn("[ChatImportService Worker] Worker extraction failed on session:", u.message);
+          const result = await worker.extractSessionEntities(convoContext);
+          if (result.summary) summary = result.summary;
+          if (result.mentioned_entities) {
+            extractedEntities = result.mentioned_entities;
+          }
+        } catch (e) {
+          console.warn("[ChatImportService Worker] Worker extraction failed on session:", e.message);
         }
-        const L = [], O = new Y(o), M = q.getInstance();
-        for (const u of h)
-          if (u.name && (L.push({
-            id: f(),
-            session_id: p.id,
-            name: u.name,
-            normalized_name: u.name.toLowerCase().trim(),
-            type: u.type || "unknown",
-            action: u.context || "mentioned"
-          }), !u.is_participant && u.type === "person")) {
-            const ie = O.findProbableMatch(u.name).find((H) => H.name.toLowerCase() === u.name.toLowerCase());
-            if (ie)
-              O.linkMention(p.id, ie.id, u.context);
-            else {
-              const H = M.addMention(p.id, u.name, u.context);
-              n == null || n.send("ingest:mention_detected", H);
+        const newEntities = [];
+        const personRepo = new PersonRepository(db);
+        const inbox = PendingMentionsManager.getInstance();
+        for (const ent of extractedEntities) {
+          if (!ent.name) continue;
+          newEntities.push({
+            id: nanoid(),
+            session_id: dbSess.id,
+            name: ent.name,
+            normalized_name: ent.name.toLowerCase().trim(),
+            type: ent.type || "unknown",
+            action: ent.context || "mentioned"
+          });
+          if (!ent.is_participant && ent.type === "person") {
+            const matches = personRepo.findProbableMatch(ent.name);
+            const exactMatch = matches.find((m) => m.name.toLowerCase() === ent.name.toLowerCase());
+            if (exactMatch) {
+              personRepo.linkMention(dbSess.id, exactMatch.id, ent.context);
+            } else {
+              const pending = inbox.addMention(dbSess.id, ent.name, ent.context);
+              sender == null ? void 0 : sender.send("ingest:mention_detected", pending);
             }
           }
-        l.updateSessionNLP(p.id, S, L), c++;
-        const ne = c > t.length * 0.7;
-        (c % 5 === 0 || c === t.length) && r({
-          stage: ne ? "nlp_entities" : "nlp_summaries",
-          percent: 20 + Math.round(c / t.length * 80),
-          label: ne ? "Resolvendo Entidades" : "Processando Resumos (Batch)",
-          detail: `${c} / ${t.length} sessões analisadas...`,
-          chatId: e
-          // Note: sending chatId along to identify bg process per chat
-        });
+        }
+        sessionRepo.updateSessionNLP(dbSess.id, summary, newEntities);
+        processed++;
+        const isEntitiesPhase = processed > rawSessions.length * 0.7;
+        if (processed % 5 === 0 || processed === rawSessions.length) {
+          emit({
+            stage: isEntitiesPhase ? "nlp_entities" : "nlp_summaries",
+            percent: 20 + Math.round(processed / rawSessions.length * 80),
+            label: isEntitiesPhase ? "Resolvendo Entidades" : "Processando Resumos (Batch)",
+            detail: `${processed} / ${rawSessions.length} sessões analisadas...`,
+            chatId
+            // Note: sending chatId along to identify bg process per chat
+          });
+        }
       }
-      r({ stage: "done", percent: 100, label: "Concluído", detail: "Entidades Indexadas para o chat.", chatId: e });
-    } catch (a) {
-      console.error("[Background NLP Exception]", a);
+      emit({ stage: "done", percent: 100, label: "Concluído", detail: `Entidades Indexadas para o chat.`, chatId });
+    } catch (err) {
+      console.error("[Background NLP Exception]", err);
     }
   }
 }
-function Ft(i) {
-  return new Promise((e, t) => {
-    const s = Ue("sha256"), n = te(i);
-    n.on("data", (r) => s.update(r)), n.on("end", () => e(s.digest("hex"))), n.on("error", t);
+function computeFileHash(filePath) {
+  return new Promise((resolve, reject) => {
+    const hash = createHash("sha256");
+    const stream = createReadStream(filePath);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", () => resolve(hash.digest("hex")));
+    stream.on("error", reject);
   });
 }
-const Ut = new Ct();
-function xt(i) {
-  g.handle("import:chat", async (e, t) => Ut.import(t, i.webContents)), g.handle("import:file-dialog", async () => {
-    const e = await Ne.showOpenDialog(i, {
+const importService = new ChatImportService();
+function registerImportHandlers(win2) {
+  ipcMain.handle("import:chat", async (_event, filePath) => {
+    return importService.import(filePath, win2.webContents);
+  });
+  ipcMain.handle("import:file-dialog", async () => {
+    const result = await dialog.showOpenDialog(win2, {
       title: "Selecionar export do WhatsApp",
       filters: [
         { name: "WhatsApp Export", extensions: ["txt", "zip"] },
@@ -1932,15 +2303,24 @@ function xt(i) {
       ],
       properties: ["openFile"]
     });
-    return e.canceled || e.filePaths.length === 0 ? null : e.filePaths[0];
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
   });
 }
-function Pt(i) {
-  const e = X.getInstance();
-  g.handle("models:check", async () => e.checkAll()), g.handle("models:download", async (t, s) => e.download(s, (n) => {
-    i.isDestroyed() || i.webContents.send("models:progress", n);
-  })), g.handle("models:select-file", async () => {
-    const t = await Ne.showOpenDialog(i, {
+function registerModelHandlers(win2) {
+  const manager = ModelManager.getInstance();
+  ipcMain.handle("models:check", async () => {
+    return manager.checkAll();
+  });
+  ipcMain.handle("models:download", async (_, key) => {
+    return manager.download(key, (progress) => {
+      if (!win2.isDestroyed()) {
+        win2.webContents.send("models:progress", progress);
+      }
+    });
+  });
+  ipcMain.handle("models:select-file", async () => {
+    const result = await dialog.showOpenDialog(win2, {
       title: "Selecionar Modelo GGUF (BYOM)",
       filters: [
         { name: "GGUF Models", extensions: ["gguf"] },
@@ -1948,404 +2328,498 @@ function Pt(i) {
       ],
       properties: ["openFile"]
     });
-    return t.canceled || t.filePaths.length === 0 ? null : t.filePaths[0];
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
   });
 }
-const C = class C {
+const _SearchService = class _SearchService {
   constructor() {
-    m(this, "chatRepo");
-    m(this, "sessionRepo");
-    m(this, "messageRepo");
-    const e = N.getInstance();
-    this.chatRepo = new B(e), this.sessionRepo = new z(e), this.messageRepo = new se(e);
+    __publicField(this, "chatRepo");
+    __publicField(this, "sessionRepo");
+    __publicField(this, "messageRepo");
+    const db = DatabaseService.getInstance();
+    this.chatRepo = new ChatRepository(db);
+    this.sessionRepo = new SessionRepository(db);
+    this.messageRepo = new MessageRepository(db);
   }
   static getInstance() {
-    return C.instance || (C.instance = new C()), C.instance;
+    if (!_SearchService.instance) {
+      _SearchService.instance = new _SearchService();
+    }
+    return _SearchService.instance;
   }
-  async search(e, t) {
-    console.log(`[SearchService] Resolving deterministic search for: "${e}"`);
-    const s = v.getInstance(), n = await s.classifyQuery(e);
-    console.log(`[SearchService] Intent: ${n.intent} | Keywords: ${n.keywords.join(", ")}`);
-    const r = n.intent, a = n.keywords && n.keywords.length > 0 ? n.keywords : [e], o = {
-      dateFrom: t == null ? void 0 : t.dateFrom,
-      dateTo: t == null ? void 0 : t.dateTo
+  async search(query, options) {
+    console.log(`[SearchService] Resolving deterministic search for: "${query}"`);
+    const worker = WorkerProcess.getInstance();
+    const classification = await worker.classifyQuery(query);
+    console.log(`[SearchService] Intent: ${classification.intent} | Keywords: ${classification.keywords.join(", ")}`);
+    const intent = classification.intent;
+    const initialKeywords = classification.keywords && classification.keywords.length > 0 ? classification.keywords : [query];
+    const dbOptions = {
+      dateFrom: options == null ? void 0 : options.dateFrom,
+      dateTo: options == null ? void 0 : options.dateTo
     };
-    console.log("[SearchService] Executing Ontology Hop (Entity Expansion)...");
-    const l = await s.expandKeywords(a), c = Array.from(/* @__PURE__ */ new Set([...a, ...l])), E = this.sessionRepo.searchAggregation(c, 8, o).map((S) => S.name);
-    E.length > 0 && console.log(`[SearchService] Ontology hop discovered relevant context entities: ${E.join(", ")}`);
-    const p = Array.from(/* @__PURE__ */ new Set([...c, ...E]));
-    let _ = this.performRouting(r, p, o);
-    return _.length === 0 && console.warn("[SearchService] Data inexistent even after lexical and ontological expansions."), _;
+    console.log(`[SearchService] Executing Ontology Hop (Entity Expansion)...`);
+    const expandedKeywords = await worker.expandKeywords(initialKeywords);
+    const combinedKeywords = Array.from(/* @__PURE__ */ new Set([...initialKeywords, ...expandedKeywords]));
+    const topEntities = this.sessionRepo.searchAggregation(combinedKeywords, 8, dbOptions);
+    const entityNames = topEntities.map((e) => e.name);
+    if (entityNames.length > 0) {
+      console.log(`[SearchService] Ontology hop discovered relevant context entities: ${entityNames.join(", ")}`);
+    }
+    const finalKeywords = Array.from(/* @__PURE__ */ new Set([...combinedKeywords, ...entityNames]));
+    let results = this.performRouting(intent, finalKeywords, dbOptions);
+    if (results.length === 0) {
+      console.warn(`[SearchService] Data inexistent even after lexical and ontological expansions.`);
+    }
+    return results;
   }
-  performRouting(e, t, s) {
-    const n = [];
-    if (e === "aggregation") {
-      const r = this.sessionRepo.searchAggregation(t, 20, s);
-      if (r.length > 0) {
-        let a = `Aggregation Results:
+  performRouting(intent, keywords, dbOptions) {
+    const results = [];
+    if (intent === "aggregation") {
+      const aggs = this.sessionRepo.searchAggregation(keywords, 20, dbOptions);
+      if (aggs.length > 0) {
+        let content = "Aggregation Results:\n";
+        for (const a of aggs) {
+          content += `- Entity: ${a.name} (${a.type}) | Count: ${a.count}
 `;
-        for (const o of r)
-          a += `- Entity: ${o.name} (${o.type}) | Count: ${o.count}
-`;
-        n.push({
-          id: f(),
+        }
+        results.push({
+          id: nanoid(),
           chatId: "",
           chatName: "Global Aggregations",
           score: 1,
-          content: a,
+          content,
           date: (/* @__PURE__ */ new Date()).toISOString(),
           sender: "System",
           intent: "aggregation",
-          metadata: { items: r }
+          metadata: { items: aggs }
         });
       }
-    } else if (e === "narrative") {
-      const r = this.sessionRepo.searchNarrative(t, 5, s);
-      for (const a of r) {
-        const o = this.chatRepo.findById(a.chat_id);
-        n.push({
-          id: a.id,
-          chatId: a.chat_id,
-          chatName: (o == null ? void 0 : o.name) || "Unknown Chat",
+    } else if (intent === "narrative") {
+      const sessions = this.sessionRepo.searchNarrative(keywords, 5, dbOptions);
+      for (const s of sessions) {
+        const chat = this.chatRepo.findById(s.chat_id);
+        results.push({
+          id: s.id,
+          chatId: s.chat_id,
+          chatName: (chat == null ? void 0 : chat.name) || "Unknown Chat",
           score: 0.9,
           content: `SESSION SUMMARY
-${a.summary}`,
-          date: new Date(a.start_time * 1e3).toISOString(),
+${s.summary}`,
+          date: new Date(s.start_time * 1e3).toISOString(),
           sender: "System",
           intent: "narrative"
         });
       }
     } else {
-      const r = this.messageRepo.searchFactual(t, 15, 5);
-      for (const a of r) {
-        if (a.length === 0) continue;
-        const o = this.chatRepo.findById(a[0].chat_id);
-        let l = "";
-        for (const c of a) {
-          const E = new Date(c.timestamp * 1e3).toISOString().split("T")[1].slice(0, 5);
-          l += `[${E}] ${c.sender}: ${c.content}
+      const windows = this.messageRepo.searchFactual(keywords, 15, 5);
+      for (const window of windows) {
+        if (window.length === 0) continue;
+        const chat = this.chatRepo.findById(window[0].chat_id);
+        let contentBlock = "";
+        for (const msg of window) {
+          const date = new Date(msg.timestamp * 1e3);
+          const tStr = date.toISOString().split("T")[1].slice(0, 5);
+          contentBlock += `[${tStr}] ${msg.sender}: ${msg.content}
 `;
         }
-        n.push({
-          id: f(),
-          chatId: a[0].chat_id,
-          chatName: (o == null ? void 0 : o.name) || "Unknown Chat",
+        results.push({
+          id: nanoid(),
+          chatId: window[0].chat_id,
+          chatName: (chat == null ? void 0 : chat.name) || "Unknown Chat",
           score: 1,
-          content: l.trim(),
-          date: new Date(a[0].timestamp * 1e3).toISOString(),
-          sender: a[0].sender,
+          content: contentBlock.trim(),
+          date: new Date(window[0].timestamp * 1e3).toISOString(),
+          sender: window[0].sender,
           intent: "factual"
         });
       }
     }
-    return n;
+    return results;
   }
 };
-m(C, "instance", null);
-let $ = C;
-function Mt() {
-  g.handle("search:query", async (i, e, t) => {
+__publicField(_SearchService, "instance", null);
+let SearchService = _SearchService;
+function registerSearchHandlers() {
+  ipcMain.handle("search:query", async (_event, query, options) => {
     try {
-      return await $.getInstance().search(e, t);
-    } catch (s) {
-      return console.error("[SearchHandlers] Error executing search:", s), [];
+      return await SearchService.getInstance().search(query, options);
+    } catch (err) {
+      console.error("[SearchHandlers] Error executing search:", err);
+      return [];
     }
   });
 }
-const bt = typeof __dirname < "u" ? __dirname : I.dirname(ee(import.meta.url)), F = class F {
+const _dirname = typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
+const _BrainProcess = class _BrainProcess {
   constructor() {
-    m(this, "worker", null);
-    m(this, "pendingRequests", /* @__PURE__ */ new Map());
-    m(this, "initializationPromise", null);
-    m(this, "ready", !1);
+    __publicField(this, "worker", null);
+    __publicField(this, "pendingRequests", /* @__PURE__ */ new Map());
+    __publicField(this, "initializationPromise", null);
+    __publicField(this, "ready", false);
   }
   static getInstance() {
-    return F.instance || (F.instance = new F()), F.instance;
+    if (!_BrainProcess.instance) {
+      _BrainProcess.instance = new _BrainProcess();
+    }
+    return _BrainProcess.instance;
   }
   async initialize() {
-    if (!this.ready) {
-      if (this.initializationPromise) return this.initializationPromise;
-      this.initializationPromise = new Promise(async (e, t) => {
-        try {
-          console.log("[BrainProcess] Resolving Brain model path...");
-          const s = await X.getInstance().resolve("brain");
-          console.log("[BrainProcess] Forking Utility Process...");
-          const n = I.join(bt, "brain-worker.js");
-          this.worker = fe.fork(n, [], {
-            stdio: "inherit"
-          }), this.worker.on("message", (a) => this.handleWorkerMessage(a)), this.worker.on("exit", (a) => {
-            console.warn(`[BrainProcess] Utility process exited with code ${a}`), this.ready = !1, this.worker = null, this.rejectAllPending(new Error(`Brain Worker exited unexpectedly with code ${a}`));
-          });
-          const r = f();
-          this.pendingRequests.set(r, {
-            resolve: () => {
-              console.log("[BrainProcess] Utility Process initialized successfully."), this.ready = !0, e();
-            },
-            reject: t
-          }), this.worker.postMessage({
-            type: "init",
-            id: r,
-            payload: { modelPath: s }
-          });
-        } catch (s) {
-          console.error("[BrainProcess] Failed to initialize:", s), this.initializationPromise = null, t(s);
-        }
-      });
+    if (this.ready) return;
+    if (this.initializationPromise) return this.initializationPromise;
+    this.initializationPromise = new Promise(async (resolve, reject) => {
       try {
-        await this.initializationPromise;
-      } finally {
+        console.log("[BrainProcess] Resolving Brain model path...");
+        const modelPath = await ModelManager.getInstance().resolve("brain");
+        console.log("[BrainProcess] Forking Utility Process...");
+        const workerPath = path.join(_dirname, "brain-worker.js");
+        this.worker = utilityProcess.fork(workerPath, [], {
+          stdio: "inherit"
+        });
+        this.worker.on("message", (msg) => this.handleWorkerMessage(msg));
+        this.worker.on("exit", (code) => {
+          console.warn(`[BrainProcess] Utility process exited with code ${code}`);
+          this.ready = false;
+          this.worker = null;
+          this.rejectAllPending(new Error(`Brain Worker exited unexpectedly with code ${code}`));
+        });
+        const id = nanoid();
+        this.pendingRequests.set(id, {
+          resolve: () => {
+            console.log("[BrainProcess] Utility Process initialized successfully.");
+            this.ready = true;
+            resolve();
+          },
+          reject
+        });
+        this.worker.postMessage({
+          type: "init",
+          id,
+          payload: { modelPath }
+        });
+      } catch (err) {
+        console.error("[BrainProcess] Failed to initialize:", err);
         this.initializationPromise = null;
+        reject(err);
       }
+    });
+    try {
+      await this.initializationPromise;
+    } finally {
+      this.initializationPromise = null;
     }
   }
   isReady() {
     return this.ready;
   }
-  async generate(e, t) {
-    return this.generateStream(e, () => {
-    }, t);
+  async generate(prompt, options) {
+    return this.generateStream(prompt, () => {
+    }, options);
   }
-  async generateStream(e, t, s) {
-    return (!this.ready || !this.worker) && await this.initialize(), new Promise((n, r) => {
-      const a = f();
-      this.pendingRequests.set(a, { resolve: n, reject: r, onToken: t }), this.worker.postMessage({
+  async generateStream(prompt, onToken, options) {
+    if (!this.ready || !this.worker) {
+      await this.initialize();
+    }
+    return new Promise((resolve, reject) => {
+      const id = nanoid();
+      this.pendingRequests.set(id, { resolve, reject, onToken });
+      this.worker.postMessage({
         type: "generate",
-        id: a,
-        payload: { prompt: e, options: s }
+        id,
+        payload: { prompt, options }
       });
     });
   }
   getModelInfo() {
     return {
-      modelName: P.brain.name,
+      modelName: MODEL_REGISTRY.brain.name,
       parameters: "4B"
     };
   }
   async dispose() {
-    this.worker && (console.log("[BrainProcess] Disposing worker..."), this.worker.postMessage({ type: "dispose" }), await new Promise((e) => {
-      const t = setTimeout(() => {
-        this.worker && this.worker.kill(), e();
+    if (!this.worker) return;
+    console.log("[BrainProcess] Disposing worker...");
+    this.worker.postMessage({ type: "dispose" });
+    await new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        if (this.worker) this.worker.kill();
+        resolve();
       }, 2e3);
       this.worker.once("exit", () => {
-        clearTimeout(t), e();
+        clearTimeout(timeout);
+        resolve();
       });
-    }), this.worker = null, this.ready = !1, this.rejectAllPending(new Error("BrainProcess is disposing or shutting down")), this.initializationPromise = null);
+    });
+    this.worker = null;
+    this.ready = false;
+    this.rejectAllPending(new Error("BrainProcess is disposing or shutting down"));
+    this.initializationPromise = null;
   }
-  handleWorkerMessage(e) {
-    const { type: t, id: s, error: n, token: r, text: a } = e;
-    if (!s || !this.pendingRequests.has(s)) {
-      t === "error" && console.error("[BrainWorker Global Error]", n);
+  handleWorkerMessage(msg) {
+    const { type, id, error, token, text } = msg;
+    if (!id || !this.pendingRequests.has(id)) {
+      if (type === "error") {
+        console.error(`[BrainWorker Global Error]`, error);
+      }
       return;
     }
-    const { resolve: o, reject: l, onToken: c } = this.pendingRequests.get(s);
-    switch (t) {
+    const { resolve, reject, onToken } = this.pendingRequests.get(id);
+    switch (type) {
       case "init-ready":
-        this.pendingRequests.delete(s), o();
+        this.pendingRequests.delete(id);
+        resolve();
         break;
       case "token":
-        c && r && c(r);
+        if (onToken && token) onToken(token);
         break;
       case "done":
-        this.pendingRequests.delete(s), o(a);
+        this.pendingRequests.delete(id);
+        resolve(text);
         break;
       case "error":
-        this.pendingRequests.delete(s), l(new Error(n));
+        this.pendingRequests.delete(id);
+        reject(new Error(error));
         break;
       default:
-        console.warn(`[BrainWorker] Unrecognized message type '${t}'`);
+        console.warn(`[BrainWorker] Unrecognized message type '${type}'`);
     }
   }
-  rejectAllPending(e) {
-    for (const [t, s] of this.pendingRequests.entries())
-      s.reject(e), this.pendingRequests.delete(t);
+  rejectAllPending(error) {
+    for (const [id, req] of this.pendingRequests.entries()) {
+      req.reject(error);
+      this.pendingRequests.delete(id);
+    }
   }
 };
-m(F, "instance", null);
-let W = F;
-const Oe = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+__publicField(_BrainProcess, "instance", null);
+let BrainProcess = _BrainProcess;
+const BrainProcess$1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
-  BrainProcess: W
-}, Symbol.toStringTag, { value: "Module" })), Bt = {
-  buildRAGPrompt: (i, e) => {
-    const t = e.map((a) => `[${a.date} - ${a.sender}]: ${a.content}`).join(`
-
-`);
-    let s = "";
-    if (e.length > 0) {
-      const a = e.map((o) => new Date(o.date).getTime()).filter((o) => !isNaN(o));
-      if (a.length > 0) {
-        const o = new Date(Math.min(...a)).toISOString().split("T")[0], l = new Date(Math.max(...a)).toISOString().split("T")[0];
-        s = `
-Regra OBRIGATÓRIA: Baseie-se EXATAMENTE nas datas providenciadas no prompt (de ${o} a ${l}). Nunca alucine datas ou informações fora desse intervalo.`;
+  BrainProcess
+}, Symbol.toStringTag, { value: "Module" }));
+const promptTemplates = {
+  buildRAGPrompt: (question, chunks) => {
+    const formattedChunks = chunks.map((c) => `[${c.date} - ${c.sender}]: ${c.content}`).join("\n\n");
+    let dateContext = "";
+    if (chunks.length > 0) {
+      const dates = chunks.map((c) => new Date(c.date).getTime()).filter((t) => !isNaN(t));
+      if (dates.length > 0) {
+        const minDate = new Date(Math.min(...dates)).toISOString().split("T")[0];
+        const maxDate = new Date(Math.max(...dates)).toISOString().split("T")[0];
+        dateContext = `
+Regra OBRIGATÓRIA: Baseie-se EXATAMENTE nas datas providenciadas no prompt (de ${minDate} a ${maxDate}). Nunca alucine datas ou informações fora desse intervalo.`;
       }
     }
-    const n = `Você é um assistente cirúrgico que extrai informações de dados históricos. Baseie sua resposta APENAS no contexto fornecido.${s}`, r = `DADOS E CONTEXTO OBTIDOS (Fontes imutáveis):
-${t}
+    const systemPrompt = `Você é um assistente cirúrgico que extrai informações de dados históricos. Baseie sua resposta APENAS no contexto fornecido.${dateContext}`;
+    const userPrompt = `DADOS E CONTEXTO OBTIDOS (Fontes imutáveis):
+${formattedChunks}
 
-PERGUNTA DO USUÁRIO: ${i}
+PERGUNTA DO USUÁRIO: ${question}
 
 Responda EXATAMENTE o que foi perguntado, formatando de maneira limpa. Se a resposta não estiver nos dados, declare tratar-se de "dados inexistentes".`;
-    return { systemPrompt: n, userPrompt: r };
+    return { systemPrompt, userPrompt };
   }
-}, Q = {
+};
+const DEFAULT_SETTINGS = {
   gpu: "auto",
   temperature: 0.3,
   systemPrompt: "Você é um assistente encarregado de ler históricos de chat. Responda apenas com o que estiver no contexto.",
   topK: 15,
-  history: !0,
-  analytics: !1,
+  history: true,
+  analytics: false,
   customBrainPath: null,
   customWorkerPath: null,
   customEmbeddingPath: null
-}, U = class U {
+};
+const _SettingsService = class _SettingsService {
   constructor() {
-    m(this, "settingsPath");
-    m(this, "currentSettings");
-    const e = A.getPath("userData");
-    this.settingsPath = Pe.join(e, "settings.json"), this.currentSettings = { ...Q }, this.load();
+    __publicField(this, "settingsPath");
+    __publicField(this, "currentSettings");
+    const userData = app.getPath("userData");
+    this.settingsPath = path$1.join(userData, "settings.json");
+    this.currentSettings = { ...DEFAULT_SETTINGS };
+    this.load();
   }
   static getInstance() {
-    return U.instance || (U.instance = new U()), U.instance;
+    if (!_SettingsService.instance) {
+      _SettingsService.instance = new _SettingsService();
+    }
+    return _SettingsService.instance;
   }
   get() {
     return { ...this.currentSettings };
   }
-  update(e) {
-    const t = e.gpu !== void 0 && e.gpu !== this.currentSettings.gpu, s = "customBrainPath" in e && e.customBrainPath !== this.currentSettings.customBrainPath, n = "customWorkerPath" in e && e.customWorkerPath !== this.currentSettings.customWorkerPath;
-    return this.currentSettings = {
+  update(partial) {
+    const hasGpuChanged = partial.gpu !== void 0 && partial.gpu !== this.currentSettings.gpu;
+    const hasBrainChanged = "customBrainPath" in partial && partial.customBrainPath !== this.currentSettings.customBrainPath;
+    const hasWorkerChanged = "customWorkerPath" in partial && partial.customWorkerPath !== this.currentSettings.customWorkerPath;
+    this.currentSettings = {
       ...this.currentSettings,
-      ...e
-    }, this.save(), (t || s || n) && setTimeout(async () => {
-      console.log("[SettingsService] Critical backend setting changed. Disposing active models for cold-restart.");
-      const { WorkerProcess: r } = await Promise.resolve().then(() => Le), { BrainProcess: a } = await Promise.resolve().then(() => Oe);
-      try {
-        r.getInstance().dispose();
-      } catch {
-      }
-      try {
-        a.getInstance().dispose();
-      } catch {
-      }
-    }, 0), this.get();
+      ...partial
+    };
+    this.save();
+    if (hasGpuChanged || hasBrainChanged || hasWorkerChanged) {
+      setTimeout(async () => {
+        console.log("[SettingsService] Critical backend setting changed. Disposing active models for cold-restart.");
+        const { WorkerProcess: WorkerProcess2 } = await Promise.resolve().then(() => WorkerProcess$1);
+        const { BrainProcess: BrainProcess2 } = await Promise.resolve().then(() => BrainProcess$1);
+        try {
+          WorkerProcess2.getInstance().dispose();
+        } catch (e) {
+        }
+        try {
+          BrainProcess2.getInstance().dispose();
+        } catch (e) {
+        }
+      }, 0);
+    }
+    return this.get();
   }
   load() {
     try {
-      if (j.existsSync(this.settingsPath)) {
-        const e = j.readFileSync(this.settingsPath, "utf-8"), t = JSON.parse(e);
+      if (fs$1.existsSync(this.settingsPath)) {
+        const data = fs$1.readFileSync(this.settingsPath, "utf-8");
+        const parsed = JSON.parse(data);
         this.currentSettings = {
-          ...Q,
-          ...t
+          ...DEFAULT_SETTINGS,
+          ...parsed
         };
-      } else
+      } else {
         this.save();
-    } catch (e) {
-      console.error("[SettingsService] Failed to load settings:", e), this.currentSettings = { ...Q };
+      }
+    } catch (error) {
+      console.error("[SettingsService] Failed to load settings:", error);
+      this.currentSettings = { ...DEFAULT_SETTINGS };
     }
   }
   save() {
     try {
-      j.writeFileSync(this.settingsPath, JSON.stringify(this.currentSettings, null, 2));
-    } catch (e) {
-      console.error("[SettingsService] Failed to save settings:", e);
+      fs$1.writeFileSync(this.settingsPath, JSON.stringify(this.currentSettings, null, 2));
+    } catch (error) {
+      console.error("[SettingsService] Failed to save settings:", error);
     }
   }
 };
-m(U, "instance");
-let G = U;
-const x = class x {
+__publicField(_SettingsService, "instance");
+let SettingsService = _SettingsService;
+const _RAGService = class _RAGService {
   constructor() {
   }
   static getInstance() {
-    return x.instance || (x.instance = new x()), x.instance;
+    if (!_RAGService.instance) {
+      _RAGService.instance = new _RAGService();
+    }
+    return _RAGService.instance;
   }
-  async generateStream(e, t, s, n) {
-    const r = performance.now(), a = { embedding: 0, search: 0, generation: 0, total: 0 };
-    let o = [];
+  async generateStream(question, onToken, options, onStep) {
+    const totalStart = performance.now();
+    const latency = { embedding: 0, search: 0, generation: 0, total: 0 };
+    let context = [];
     try {
-      n && n("booting");
-      const l = G.getInstance().get();
-      n && n("searching");
-      const c = performance.now();
-      if (o = await $.getInstance().search(e, {
-        limit: l.topK,
-        chatId: s == null ? void 0 : s.chatId
-      }), a.search = performance.now() - c, o.length === 0)
-        return a.total = performance.now() - r, {
+      if (onStep) onStep("booting");
+      const config = SettingsService.getInstance().get();
+      if (onStep) onStep("searching");
+      const searchStart = performance.now();
+      context = await SearchService.getInstance().search(question, {
+        limit: config.topK,
+        chatId: options == null ? void 0 : options.chatId
+      });
+      latency.search = performance.now() - searchStart;
+      if (context.length === 0) {
+        latency.total = performance.now() - totalStart;
+        return {
           answer: "Dados inexistentes. Não foi possível localizar o contexto ou menções referentes à sua busca neste chat.",
-          context: o,
+          context,
           tokensUsed: 0,
-          latency: a
+          latency
         };
-      n && n("processing");
-      const { userPrompt: d } = Bt.buildRAGPrompt(e, o), E = l.systemPrompt;
-      n && n("synthesizing");
-      const p = performance.now(), _ = W.getInstance();
-      let S = "", h = 0;
+      }
+      if (onStep) onStep("processing");
+      const { userPrompt } = promptTemplates.buildRAGPrompt(question, context);
+      const systemPrompt = config.systemPrompt;
+      if (onStep) onStep("synthesizing");
+      const generationStart = performance.now();
+      const brainProcess = BrainProcess.getInstance();
+      let answer = "";
+      let tokensUsed = 0;
       try {
-        S = await _.generateStream(
-          d,
-          (L) => {
-            h++, t && t(L);
+        answer = await brainProcess.generateStream(
+          userPrompt,
+          (token) => {
+            tokensUsed++;
+            if (onToken) onToken(token);
           },
           {
-            temperature: (s == null ? void 0 : s.temperature) ?? l.temperature,
-            maxTokens: (s == null ? void 0 : s.maxTokens) || 1024,
-            systemPrompt: E
+            temperature: (options == null ? void 0 : options.temperature) ?? config.temperature,
+            maxTokens: (options == null ? void 0 : options.maxTokens) || 1024,
+            systemPrompt
           }
         );
-      } catch (L) {
-        console.error("[RAGService] Error generating response from BrainProcess:", L), S = `Desculpe, ocorreu um erro ao gerar a resposta ou a IA falhou.
-
-Contexto encontrado:` + o.map((O, M) => `
-[${M + 1}] ${O.date} ${O.sender}: ${O.content}`).join("");
+      } catch (llmError) {
+        console.error("[RAGService] Error generating response from BrainProcess:", llmError);
+        answer = "Desculpe, ocorreu um erro ao gerar a resposta ou a IA falhou.\n\nContexto encontrado:" + context.map((c, i) => `
+[${i + 1}] ${c.date} ${c.sender}: ${c.content}`).join("");
       }
-      return a.generation = performance.now() - p, a.total = performance.now() - r, {
-        answer: S,
-        context: o,
-        tokensUsed: h,
-        latency: a
+      latency.generation = performance.now() - generationStart;
+      latency.total = performance.now() - totalStart;
+      return {
+        answer,
+        context,
+        tokensUsed,
+        latency
       };
-    } catch (l) {
-      throw console.error("[RAGService] Fatal error in RAG pipeline:", l), l;
+    } catch (err) {
+      console.error("[RAGService] Fatal error in RAG pipeline:", err);
+      throw err;
     }
   }
 };
-m(x, "instance", null);
-let J = x;
-function Xt(i) {
-  g.handle("rag:query", async (e, t, s) => {
+__publicField(_RAGService, "instance", null);
+let RAGService = _RAGService;
+function registerRagHandlers(win2) {
+  ipcMain.handle("rag:query", async (_event, question, options) => {
     try {
-      const r = await J.getInstance().generateStream(
-        t,
-        (a) => {
-          i.webContents.send("rag:token", a);
+      const ragService = RAGService.getInstance();
+      const response = await ragService.generateStream(
+        question,
+        (token) => {
+          win2.webContents.send("rag:token", token);
         },
-        s,
-        (a) => {
-          i.webContents.send("rag:step", a);
+        options,
+        (step) => {
+          win2.webContents.send("rag:step", step);
         }
       );
-      i.webContents.send("rag:done", r);
-    } catch (n) {
-      throw console.error("[IPC rag:query] Error:", n), n;
+      win2.webContents.send("rag:done", response);
+    } catch (error) {
+      console.error("[IPC rag:query] Error:", error);
+      throw error;
     }
-  }), g.handle("rag:status", async () => {
-    const { BrainProcess: e } = await Promise.resolve().then(() => Oe), { WorkerProcess: t } = await Promise.resolve().then(() => Le);
+  });
+  ipcMain.handle("rag:status", async () => {
+    const { BrainProcess: BrainProcess2 } = await Promise.resolve().then(() => BrainProcess$1);
+    const { WorkerProcess: WorkerProcess2 } = await Promise.resolve().then(() => WorkerProcess$1);
     return {
       brain: {
-        ready: e.getInstance().isReady()
+        ready: BrainProcess2.getInstance().isReady()
       },
       worker: {
-        ready: t.getInstance().isReady(),
-        fallback: t.getInstance().getFallbackStatus()
+        ready: WorkerProcess2.getInstance().isReady(),
+        fallback: WorkerProcess2.getInstance().getFallbackStatus()
       }
     };
   });
 }
-function vt() {
-  g.handle("settings:get", async () => G.getInstance().get()), g.handle("settings:update", async (i, e) => G.getInstance().update(e));
+function registerSettingsHandlers() {
+  ipcMain.handle("settings:get", async () => {
+    return SettingsService.getInstance().get();
+  });
+  ipcMain.handle("settings:update", async (_event, partial) => {
+    return SettingsService.getInstance().update(partial);
+  });
 }
-const _e = [
+const COLORS = [
   "#ef4444",
   "#f97316",
   "#f59e0b",
@@ -2357,89 +2831,129 @@ const _e = [
   "#a855f7",
   "#ec4899"
 ];
-function Gt() {
-  return _e[Math.floor(Math.random() * _e.length)];
+function getRandomColor() {
+  return COLORS[Math.floor(Math.random() * COLORS.length)];
 }
-function Yt() {
-  const i = q.getInstance();
-  g.handle("mentions:get_pending", async () => i.getPending()), g.handle("mentions:get_people", async () => {
-    const e = N.getInstance();
-    return new Y(e).findAll();
-  }), g.handle("mentions:get_relations", async () => {
-    const e = N.getInstance();
-    return new Y(e).findAllRelations();
-  }), g.handle("mentions:resolve", async (e, t, s, n) => {
-    const r = i.getMentionById(t);
-    if (!r)
-      throw new Error(`Mention ${t} not found in pending inbox.`);
-    const a = N.getInstance(), o = new Y(a), l = i.extractClones(r.alias), c = [r, ...l.filter((d) => d.id !== r.id)];
+function registerPeopleHandlers() {
+  const inbox = PendingMentionsManager.getInstance();
+  ipcMain.handle("mentions:get_pending", async () => {
+    return inbox.getPending();
+  });
+  ipcMain.handle("mentions:get_people", async () => {
+    const db = DatabaseService.getInstance();
+    const repo = new PersonRepository(db);
+    return repo.findAll();
+  });
+  ipcMain.handle("mentions:get_relations", async () => {
+    const db = DatabaseService.getInstance();
+    const repo = new PersonRepository(db);
+    return repo.findAllRelations();
+  });
+  ipcMain.handle("mentions:resolve", async (_event, mentionId, action, personId) => {
+    const mention = inbox.getMentionById(mentionId);
+    if (!mention) {
+      throw new Error(`Mention ${mentionId} not found in pending inbox.`);
+    }
+    const db = DatabaseService.getInstance();
+    const repo = new PersonRepository(db);
+    const clones = inbox.extractClones(mention.alias);
+    const allToProcess = [mention, ...clones.filter((c) => c.id !== mention.id)];
     try {
-      if (s === "create_new") {
-        const d = o.createPersonWithAlias(r.alias, r.alias, Gt());
-        for (const E of c)
-          o.linkMention(E.sessionId, d, E.context);
-      } else if (s === "link_existing") {
-        if (!n) throw new Error("personId required for link_existing");
-        a.prepare("INSERT OR IGNORE INTO person_aliases (person_id, alias) VALUES (?, ?)").run(n, r.alias);
-        for (const d of c)
-          o.linkMention(d.sessionId, n, d.context);
+      if (action === "create_new") {
+        const newPersonId = repo.createPersonWithAlias(mention.alias, mention.alias, getRandomColor());
+        for (const item of allToProcess) {
+          repo.linkMention(item.sessionId, newPersonId, item.context);
+        }
+      } else if (action === "link_existing") {
+        if (!personId) throw new Error("personId required for link_existing");
+        db.prepare(`INSERT OR IGNORE INTO person_aliases (person_id, alias) VALUES (?, ?)`).run(personId, mention.alias);
+        for (const item of allToProcess) {
+          repo.linkMention(item.sessionId, personId, item.context);
+        }
+      } else if (action === "ignore") {
       }
-      i.removeMention(t);
-    } catch (d) {
-      throw console.error("[PeopleHandlers] Failed to resolve mention:", d), d;
+      inbox.removeMention(mentionId);
+    } catch (error) {
+      console.error("[PeopleHandlers] Failed to resolve mention:", error);
+      throw error;
     }
   });
 }
-function zt(i) {
-  ut(), xt(i), Pt(i), Mt(), Xt(i), vt(), Yt();
+function registerAllHandlers(win2) {
+  registerChatHandlers();
+  registerImportHandlers(win2);
+  registerModelHandlers(win2);
+  registerSearchHandlers();
+  registerRagHandlers(win2);
+  registerSettingsHandlers();
+  registerPeopleHandlers();
 }
-const Ae = I.dirname(ee(import.meta.url));
-process.env.APP_ROOT = I.join(Ae, "..");
-const Z = process.env.VITE_DEV_SERVER_URL, ss = I.join(process.env.APP_ROOT, "dist-electron"), ye = I.join(process.env.APP_ROOT, "dist");
-process.env.VITE_PUBLIC = Z ? I.join(process.env.APP_ROOT, "public") : ye;
-let T;
-function we() {
-  T = new Ie({
+const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
+process.env.APP_ROOT = path.join(__dirname$1, "..");
+const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
+const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
+const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
+let win;
+function createWindow() {
+  win = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    frame: !1,
+    frame: false,
     // Custom titlebar
     titleBarStyle: "hidden",
     backgroundColor: "#080b0d",
-    show: !1,
+    show: false,
     // Prevent white flash
     webPreferences: {
-      preload: I.join(Ae, "preload.mjs"),
-      contextIsolation: !0,
-      nodeIntegration: !1
+      preload: path.join(__dirname$1, "preload.mjs"),
+      contextIsolation: true,
+      nodeIntegration: false
     }
-  }), T.once("ready-to-show", () => {
-    T == null || T.show();
-  }), g.on("window:minimize", () => T == null ? void 0 : T.minimize()), g.on("window:maximize", () => {
-    T != null && T.isMaximized() ? T.unmaximize() : T == null || T.maximize();
-  }), g.on("window:close", () => T == null ? void 0 : T.close()), zt(T), Z ? (T.loadURL(Z), T.webContents.openDevTools({ mode: "detach" })) : T.loadFile(I.join(ye, "index.html"));
-}
-A.on("window-all-closed", () => {
-  process.platform !== "darwin" && (A.quit(), T = null);
-});
-A.on("activate", () => {
-  Ie.getAllWindows().length === 0 && we();
-});
-A.on("before-quit", () => {
-  N.close();
-});
-A.whenReady().then(() => {
-  try {
-    N.getInstance();
-  } catch (i) {
-    console.error("[Main] Failed to initialize database:", i);
+  });
+  win.once("ready-to-show", () => {
+    win == null ? void 0 : win.show();
+  });
+  ipcMain.on("window:minimize", () => win == null ? void 0 : win.minimize());
+  ipcMain.on("window:maximize", () => {
+    if (win == null ? void 0 : win.isMaximized()) win.unmaximize();
+    else win == null ? void 0 : win.maximize();
+  });
+  ipcMain.on("window:close", () => win == null ? void 0 : win.close());
+  registerAllHandlers(win);
+  if (VITE_DEV_SERVER_URL) {
+    win.loadURL(VITE_DEV_SERVER_URL);
+    win.webContents.openDevTools({ mode: "detach" });
+  } else {
+    win.loadFile(path.join(RENDERER_DIST, "index.html"));
   }
-  we();
+}
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
+    win = null;
+  }
+});
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
+});
+app.on("before-quit", () => {
+  DatabaseService.close();
+});
+app.whenReady().then(() => {
+  try {
+    DatabaseService.getInstance();
+  } catch (err) {
+    console.error("[Main] Failed to initialize database:", err);
+  }
+  createWindow();
 });
 export {
-  ss as MAIN_DIST,
-  ye as RENDERER_DIST,
-  Z as VITE_DEV_SERVER_URL
+  MAIN_DIST,
+  RENDERER_DIST,
+  VITE_DEV_SERVER_URL
 };

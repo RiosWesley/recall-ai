@@ -872,9 +872,108 @@ src/main/services/
 | **Fase 4** — Deterministic Pipeline | 2 | 1 | 🟡 Em andamento |
 | **Fase 5** — Interactive Interface & QA | 3 | 0 | ⬜ Não iniciada |
 | **Fase 6** — Identity Graph & Mentions | 4 | 4 | ✅ Concluída |
-| **TOTAL** | **22** | **16** | **72%** |
+| **Fase 7** — Map-Reduce Engine | 4 | 0 | ⬜ Não iniciada |
+| **Fase 8** — Smart Features | 2 | 0 | ⬜ Não iniciada |
+| **Fase 9** — Multi-App & Multimodal | 2 | 0 | ⬜ Não iniciada |
+| **TOTAL** | **30** | **16** | **53%** |
 
 **Milestones:**
 - [x] **MVP 1** — Pipeline de Storage Básico Funcional
 - [ ] **MVP 2** (após TASK 4.2) — Orquestração de Síntese sem Vector DB
 - [ ] **v1.0** (após TASK 5.3) — UI Reativa com Transparência de Hit
+- [ ] **v1.1** (após TASK 7.4) — Grafo de Identidade Inteligente
+
+---
+
+# FASE 7 — MAP-REDUCE ENGINE (INTELIGÊNCIA DOS PERFIS)
+
+> **Meta:** Otimizar a inteligência das pessoas cadastradas, extraindo tags e memórias biográficas de forma autônoma e em background através do LLM.
+
+---
+
+## [ ] TASK 7.1 — Schema de Conhecimento Individual (Tags & Memories)
+
+**Objetivo:** Preparar o SQLite para armazenar as entidades sintéticas extraídas das pessoas.
+**Documentação completa:** `docs/task-docs/05-phase7-mapreduce.md`
+**Critérios de aceitação:**
+- [ ] Migration `009_person_knowledge_schema.ts` criada (tabelas `person_tags` e `person_key_memories`).
+- [ ] Tipos atualizados em `shared/types.ts`.
+- [ ] DAO atualizado no `PersonRepository` com métodos para inserir tags e memórias.
+
+---
+
+## [ ] TASK 7.2 — Map-Reduce Background Service
+
+**Objetivo:** Criar o orquestrador que extrai os dados em background de forma passiva.
+**Critérios de aceitação:**
+- [ ] `MapReduceService.ts` criado com rotina periódica.
+- [ ] Busca por menções não-processadas.
+- [ ] Mega-prompt montado e enviado ao BrainProcess (Qwen3B) ou WorkerProcess (LFM2.5).
+- [ ] JSON resultante validado em strict mode, contendo `tags` e `memories`.
+
+---
+
+## [ ] TASK 7.3 — Consolidação Incremental no Banco
+
+**Objetivo:** Persistir os achados da IA na biografia da pessoa.
+**Critérios de aceitação:**
+- [ ] Salvar novas tags em `person_tags` via `INSERT OR IGNORE`.
+- [ ] Adicionar memórias em `person_key_memories`.
+- [ ] Marcar menções usadas com `processed = 1` para não gastar GPU desnecessária no futuro.
+
+---
+
+## [ ] TASK 7.4 — Integração Definitiva na UI (People.tsx)
+
+**Objetivo:** Conectar a inteligência do Backend à UI do Frontend de Pessoas.
+**Critérios de aceitação:**
+- [ ] `getPeople` modificado para trazer as subqueries de tags e memórias preenchidas.
+- [ ] Mocks vazios removidos do `People.tsx`.
+- [ ] Painel lateral renderizando corretamente todos os dados inteligentes que a IA absorveu.
+
+---
+
+# FASE 8 — SMART FEATURES
+
+> **Meta:** Processamento avançado do LLM no conteúdo das conversas. Extração automatizada de entidades para além de pessoas.
+
+---
+
+## [ ] TASK 8.1 — Timeline e Agendamentos
+
+**Objetivo:** Identificar datas e agendamentos mencionados, listando em uma timeline consolidada.
+**Critérios de aceitação:**
+- [ ] O modelo Worker extrai eventos temporais (ex: "Viagem amanhã", "Médico dia 15").
+- [ ] UI de Agenda exibe os eventos cronologicamente.
+
+---
+
+## [ ] TASK 8.2 — Resumos Automáticos de Sessão na UI
+
+**Objetivo:** Exibir os resumos JSON extraídos da ingestão inteligente diretamente na lista de sessões do Chat.
+**Critérios de aceitação:**
+- [ ] A Sidebar de Chats mostra pequenos resumos dinâmicos ao invés de apenas a "última mensagem".
+
+---
+
+# FASE 9 — MULTI-APP & MULTIMODAL
+
+> **Meta:** Expansão para outras plataformas (Telegram, Instagram) e Busca Visual.
+
+---
+
+## [ ] TASK 9.1 — Parsers Adicionais (Telegram e Instagram)
+
+**Objetivo:** Adaptar o `ChatImportService` para ingerir JSONs de exportação de outras redes.
+**Critérios de aceitação:**
+- [ ] Ingestão de chat exportado do Telegram funciona e agrupa no Grafo.
+- [ ] Ingestão de export do Instagram DMs funciona.
+
+---
+
+## [ ] TASK 9.2 — Busca de Imagem (CLIP)
+
+**Objetivo:** Empregar o modelo CLIP via node-llama-cpp para gerar embeddings de imagens locais recebidas em conversas, permitindo buscas visuais.
+**Critérios de aceitação:**
+- [ ] Extrair media references do parser de chat e embedar a imagem local via CLIP.
+- [ ] Input de busca no Frontend consegue cruzar texto ("foto da praia") com o embedding da imagem e exibí-la.
