@@ -11,6 +11,7 @@ import { runMigration006 } from './migrations/006_intelligent_ingestion'
 import { runMigration007 } from './migrations/007_search_indexes'
 import { runMigration008 } from './migrations/008_people_schema'
 import { runMigration009 } from './migrations/009_person_knowledge_schema'
+import { runMigration010 } from './migrations/010_person_mentions_processed'
 
 let instance: Database.Database | null = null
 
@@ -54,6 +55,7 @@ export class DatabaseService {
     runMigration007(db)
     runMigration008(db)
     runMigration009(db)
+    runMigration010(db)
 
     console.log('[DB] Database ready')
 

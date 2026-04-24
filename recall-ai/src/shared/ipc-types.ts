@@ -66,6 +66,13 @@ export interface ElectronAPI {
   resolveMention(mentionId: string, action: import('./types').MentionResolutionAction, personId?: string): Promise<void>
   onMentionDetected(cb: (mention: import('./types').PendingMention) => void): () => void
 
+  // ── Map-Reduce (Phase 7) ─────────────────────────────────────────────────────
+  /** Returns the current status of the background Map-Reduce knowledge service. */
+  getMapReduceStatus(): Promise<import('./types').MapReduceStatus>
+  /** Trigger an immediate extraction pass (useful for manual refresh in the UI). */
+  runMapReduceNow(): Promise<import('./types').MapReduceStatus>
+
+
   // ── Window controls ─────────────────────────────────────────────────────────
   windowMinimize(): void
   windowMaximize(): void

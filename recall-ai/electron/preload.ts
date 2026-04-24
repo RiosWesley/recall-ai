@@ -114,6 +114,16 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.off('ingest:mention_detected', listener)
   },
 
+  // ── Map-Reduce (Phase 7) ─────────────────────────────────────────────────────
+  getMapReduceStatus(): Promise<import('../src/shared/types').MapReduceStatus> {
+    return ipcRenderer.invoke('mapreduce:status')
+  },
+
+  runMapReduceNow(): Promise<import('../src/shared/types').MapReduceStatus> {
+    return ipcRenderer.invoke('mapreduce:run_now')
+  },
+
+
   // ── Window controls ─────────────────────────────────────────────────────────
   windowMinimize(): void {
     ipcRenderer.send('window:minimize')

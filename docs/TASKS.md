@@ -902,7 +902,7 @@ src/main/services/
 
 ---
 
-## [ ] TASK 7.2 — Map-Reduce Background Service
+## [x] TASK 7.2 — Map-Reduce Background Service
 
 **Objetivo:** Criar o orquestrador que extrai os dados em background de forma passiva.
 **Critérios de aceitação:**

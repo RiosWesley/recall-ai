@@ -11,6 +11,7 @@ import { registerSearchHandlers } from './searchHandlers'
 import { registerRagHandlers } from './ragHandlers'
 import { registerSettingsHandlers } from './settingsHandlers'
 import { registerPeopleHandlers } from './peopleHandlers'
+import { registerMapReduceHandlers } from './mapReduceHandlers'
 
 export function registerAllHandlers(win: BrowserWindow) {
   registerChatHandlers()
@@ -20,4 +21,5 @@ export function registerAllHandlers(win: BrowserWindow) {
   registerRagHandlers(win)
   registerSettingsHandlers()
   registerPeopleHandlers()
+  registerMapReduceHandlers()
 }

@@ -330,6 +330,23 @@ export interface RAGResponse {
 
 // ─── MAP-REDUCE ENGINE ────────────────────────────────────────────────────────
 
+/**
+ * Real-time status snapshot of the MapReduceService background loop.
+ * Returned by the `mapreduce:status` and `mapreduce:run_now` IPC handlers.
+ */
+export interface MapReduceStatus {
+  isRunning: boolean
+  /** Unix ms timestamp of the last completed pass, or null if never run. */
+  lastRun: number | null
+  peopleProcessed: number
+  totalTagsInserted: number
+  totalMemoriesInserted: number
+  /** Last error message, or null if the most recent pass succeeded. */
+  error: string | null
+}
+
+
+
 export interface ContactProfile {
   id?: string
   contact_id: string

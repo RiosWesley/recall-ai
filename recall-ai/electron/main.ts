@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { DatabaseService } from '../src/main/db/database'
 import { registerAllHandlers } from '../src/main/ipc/index'
+import { MapReduceService } from '../src/main/services/MapReduceService'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -74,6 +75,7 @@ app.on('activate', () => {
 })
 
 app.on('before-quit', () => {
+  MapReduceService.getInstance().stop()
   DatabaseService.close()
 })
 
@@ -81,6 +83,8 @@ app.whenReady().then(() => {
   // Initialize database on first access (lazy — creates file only when needed)
   try {
     DatabaseService.getInstance()
+    // Start the background Map-Reduce loop (runs every 60s when the Worker is ready)
+    MapReduceService.getInstance().start()
   } catch (err) {
     console.error('[Main] Failed to initialize database:', err)
   }
