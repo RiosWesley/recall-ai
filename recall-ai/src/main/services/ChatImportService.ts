@@ -80,6 +80,30 @@ export class ChatImportService {
 
       emit({ stage: 'fts_indexing', percent: 25, label: 'Agrupando Sessões', detail: 'Topologia Cronológica...' })
       
+      const personRepo = new PersonRepository(db)
+      const senderCounts: Record<string, number> = {}
+      for (const m of parseResult.messages) {
+        if (!senderCounts[m.sender]) senderCounts[m.sender] = 0
+        senderCounts[m.sender]++
+      }
+
+      for (const participant of parseResult.stats.participants) {
+        if (participant.toLowerCase() === 'system') continue
+        
+        const count = senderCounts[participant] || 0
+        const matches = personRepo.findProbableMatch(participant)
+        const exactMatch = matches.find(m => m.name.toLowerCase() === participant.toLowerCase())
+        
+        if (exactMatch) {
+          db.prepare('UPDATE people SET message_count = message_count + ? WHERE id = ?').run(count, exactMatch.id)
+        } else {
+          const colors = ['#ef4444', '#f97316', '#f59e0b', '#84cc16', '#22c55e', '#06b6d4', '#3b82f6', '#6366f1', '#a855f7', '#ec4899']
+          const color = colors[Math.floor(Math.random() * colors.length)]
+          const personId = personRepo.createPersonWithAlias(participant, participant, color)
+          db.prepare('UPDATE people SET message_count = ? WHERE id = ?').run(count, personId)
+        }
+      }
+
       const rawSessions = this.sessionEngine.group(parseResult.messages)
 
       const newSessions: NewSession[] = []
@@ -156,71 +180,77 @@ export class ChatImportService {
       const sessionRepo = new SessionRepository(db)
 
       let processed = 0
-      for (let i = 0; i < rawSessions.length; i++) {
-        const rawSess = rawSessions[i]
-        const dbSess = dbSessions[i]
-        const convoContext = rawSess.messages.map(m => `[${new Date(m.timestamp * 1000).toISOString()}] ${m.sender}: ${m.content}`).join('\n')
-        
-        let summary = "Sessão concluída (sem detalhes extraídos)"
-        let extractedEntities: import('../../shared/types').MentionedEntity[] = []
+      const BATCH_SIZE = 4
 
+      for (let i = 0; i < rawSessions.length; i += BATCH_SIZE) {
+        const batchRaw = rawSessions.slice(i, i + BATCH_SIZE)
+        const batchDb = dbSessions.slice(i, i + BATCH_SIZE)
+        
+        const sessionsText = batchRaw.map(rawSess => 
+          rawSess.messages.map(m => `[${new Date(m.timestamp * 1000).toISOString()}] ${m.sender}: ${m.content}`).join('\n')
+        )
+        
+        let batchResults: import('../../shared/types').SessionExtractionResult[] = []
         try {
-          const result = await worker.extractSessionEntities(convoContext)
-          if (result.summary) summary = result.summary
-          if (result.mentioned_entities) {
-            extractedEntities = result.mentioned_entities
-          }
-        } catch(e: any) {
-          console.warn('[ChatImportService Worker] Worker extraction failed on session:', e.message)
+          batchResults = await worker.extractBatchSessionEntities(sessionsText)
+        } catch (e: any) {
+          console.warn('[ChatImportService Worker] Batch extraction failed:', e.message)
+          batchResults = sessionsText.map(() => ({ summary: "Sessão extraída via fallback de erro", mentioned_entities: [] }))
         }
 
-        const newEntities: NewEntity[] = []
-        const personRepo = new PersonRepository(db)
-        const inbox = PendingMentionsManager.getInstance()
-
-        for (const ent of extractedEntities) {
-          if (!ent.name) continue
+        for (let j = 0; j < batchRaw.length; j++) {
+          const dbSess = batchDb[j]
+          const result = batchResults[j] || { summary: "Sessão concluída (sem detalhes extraídos)", mentioned_entities: [] }
           
-          // Map to legacy 'entities' table for general Search Index
-          newEntities.push({
-            id: nanoid(),
-            session_id: dbSess.id!,
-            name: ent.name,
-            normalized_name: ent.name.toLowerCase().trim(),
-            type: ent.type || 'unknown',
-            action: ent.context || 'mentioned'
-          })
+          let summary = result.summary || "Sessão concluída (sem detalhes extraídos)"
+          let extractedEntities = Array.isArray(result.mentioned_entities) ? result.mentioned_entities : []
 
-          // Phase 6 Identity Graph mapping
-          if (!ent.is_participant && ent.type === 'person') {
-            const matches = personRepo.findProbableMatch(ent.name)
-            // Auto-resolve if exactly 1 perfect match is found
-            const exactMatch = matches.find(m => m.name.toLowerCase() === ent.name.toLowerCase())
-            if (exactMatch) {
-              personRepo.linkMention(dbSess.id!, exactMatch.id, ent.context)
-            } else {
-              // Ambiguous or New -> send to Inbox
-              const pending = inbox.addMention(dbSess.id!, ent.name, ent.context)
-              sender?.send('ingest:mention_detected', pending)
+          const newEntities: NewEntity[] = []
+          const personRepo = new PersonRepository(db)
+          const inbox = PendingMentionsManager.getInstance()
+
+          for (const ent of extractedEntities) {
+            if (!ent.name) continue
+            
+            // Map to legacy 'entities' table for general Search Index
+            newEntities.push({
+              id: nanoid(),
+              session_id: dbSess.id!,
+              name: ent.name,
+              normalized_name: ent.name.toLowerCase().trim(),
+              type: ent.type || 'unknown',
+              action: ent.context || 'mentioned'
+            })
+
+            // Phase 6 Identity Graph mapping
+            if (!ent.is_participant && ent.type === 'person') {
+              const matches = personRepo.findProbableMatch(ent.name)
+              // Auto-resolve if exactly 1 perfect match is found
+              const exactMatch = matches.find(m => m.name.toLowerCase() === ent.name.toLowerCase())
+              if (exactMatch) {
+                personRepo.linkMention(dbSess.id!, exactMatch.id, ent.context)
+              } else {
+                // Ambiguous or New -> send to Inbox
+                const pending = inbox.addMention(dbSess.id!, ent.name, ent.context)
+                sender?.send('ingest:mention_detected', pending)
+              }
             }
           }
+
+          // Update this session in Database
+          sessionRepo.updateSessionNLP(dbSess.id!, summary, newEntities)
         }
 
-        // Update this session in Database
-        sessionRepo.updateSessionNLP(dbSess.id!, summary, newEntities)
-
-        processed++
+        processed += batchRaw.length
         const isEntitiesPhase = processed > rawSessions.length * 0.7
 
-        if (processed % 5 === 0 || processed === rawSessions.length) {
-          emit({ 
-            stage: isEntitiesPhase ? 'nlp_entities' : 'nlp_summaries', 
-            percent: 20 + Math.round((processed / rawSessions.length) * 80), 
-            label: isEntitiesPhase ? 'Resolvendo Entidades' : 'Processando Resumos (Batch)', 
-            detail: `${processed} / ${rawSessions.length} sessões analisadas...`,
-            chatId // Note: sending chatId along to identify bg process per chat
-          } as any) // Type assertion to bypass strict interface since we added chatId in payload dynamically
-        }
+        emit({ 
+          stage: isEntitiesPhase ? 'nlp_entities' : 'nlp_summaries', 
+          percent: 20 + Math.round((processed / rawSessions.length) * 80), 
+          label: isEntitiesPhase ? 'Resolvendo Entidades' : 'Processando Resumos (Batch)', 
+          detail: `${processed} / ${rawSessions.length} sessões analisadas...`,
+          chatId // Note: sending chatId along to identify bg process per chat
+        } as any) // Type assertion to bypass strict interface since we added chatId in payload dynamically
       }
 
       emit({ stage: 'done', percent: 100, label: 'Concluído', detail: `Entidades Indexadas para o chat.`, chatId } as any)

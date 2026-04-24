@@ -11,7 +11,7 @@ export class SessionEngine {
   private readonly maxGapSeconds: number
   private readonly maxTokens: number
 
-  constructor(maxGapSeconds = 7200, maxTokens = 400) {
+  constructor(maxGapSeconds = 7200, maxTokens = 1500) {
     this.maxGapSeconds = maxGapSeconds // Default 2 hours gap
     this.maxTokens = maxTokens // Adaptive chunking limit
   }

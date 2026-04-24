@@ -343,6 +343,79 @@ ${sessionText}
     }
   }
 
+  async extractBatchSessionEntities(sessionsText: string[]): Promise<import('../../shared/types').SessionExtractionResult[]> {
+    if (sessionsText.length === 0) return [];
+    
+    let combinedText = '';
+    sessionsText.forEach((text, i) => {
+      combinedText += `\n--- SESSION ${i} ---\n${text}\n`;
+    });
+
+    const prompt = `You are a strict JSON extraction tool. Analyze these chat sessions and extract summaries and third-party mentions for EACH session.
+Output ONLY raw JSON. Do not output markdown, explanations, or conversational text.
+
+Rules for each session:
+1. "summary": A 1-sentence summary of what happened.
+2. "mentioned_entities": An array of entities (people, organizations) mentioned.
+   - Ignore generic nouns or brands unless they are the primary subject.
+   - "name": The extracted name.
+   - "type": "person" | "organization" | "other"
+   - "context": EXACT words or a very close paraphrase of what was said about them in the chat.
+   - "sentiment": "positive" | "negative" | "neutral"
+   - "is_participant": true if this person is one of the chat participants, false if it's a third-party mention.
+
+Schema:
+{
+  "results": [
+    {
+      "summary": "str",
+      "mentioned_entities": [
+        { "name": "str", "type": "str", "context": "str", "sentiment": "str", "is_participant": boolean }
+      ]
+    }
+  ]
+}
+Note: The "results" array MUST have exactly ${sessionsText.length} items, one for each session in the exact same order.
+
+Sessions:
+${combinedText}
+`;
+
+    const options: GenerateOptions = {
+      temperature: 0.1,
+      maxTokens: 1500,
+      systemPrompt: "You are a headless JSON API. You MUST respond with valid JSON matching the exact schema. Always return an array of results with the exact same length as the input sessions."
+    };
+
+    const startTime = Date.now();
+    try {
+      const res = await this.generateJson<{results: import('../../shared/types').SessionExtractionResult[]}>(prompt, options, 3);
+      const duration = Date.now() - startTime;
+      console.log(`[WorkerProcess] extractBatchSessionEntities completed in ${duration}ms for ${sessionsText.length} sessions`);
+      
+      let results = Array.isArray(res.results) ? res.results : [];
+      
+      // Ensure we always return an array of exact length
+      while (results.length < sessionsText.length) {
+        results.push({ summary: "Sessão extraída via fallback de tamanho", mentioned_entities: [] });
+      }
+      return results.slice(0, sessionsText.length).map(r => ({
+        summary: r?.summary || "Sessão extraída",
+        mentioned_entities: Array.isArray(r?.mentioned_entities) ? r.mentioned_entities : []
+      }));
+      
+    } catch (e: any) {
+      const duration = Date.now() - startTime;
+      console.error(`[WorkerProcess] extractBatchSessionEntities completely failed after ${duration}ms:`, e.message);
+      
+      // Graceful degradation / Fallback for all
+      return sessionsText.map(() => ({
+        summary: "Sessão extraída via fallback de erro",
+        mentioned_entities: []
+      }));
+    }
+  }
+
   private async processNextInQueue() {
     if (this.processingQueue || this.batchQueue.length === 0) return;
     this.processingQueue = true;
