@@ -875,13 +875,17 @@ src/main/services/
 | **Fase 7** — Map-Reduce Engine | 4 | 4 | ✅ Concluída |
 | **Fase 8** — Smart Features | 2 | 0 | ⬜ Não iniciada |
 | **Fase 9** — Multi-App & Multimodal | 2 | 0 | ⬜ Não iniciada |
-| **TOTAL** | **30** | **18** | **60%** |
+| **Fase 10** — Polish & Persistência | 4 | 0 | ⬜ Não iniciada |
+| **Fase 11** — Distribuição & Auto-Update | 3 | 0 | ⬜ Não iniciada |
+| **Fase 12** — Mobile v2.0 (React Native) | 5 | 0 | ⬜ Não iniciada |
+| **TOTAL** | **42** | **18** | **43%** |
 
 **Milestones:**
 - [x] **MVP 1** — Pipeline de Storage Básico Funcional
 - [ ] **MVP 2** (após TASK 4.2) — Orquestração de Síntese sem Vector DB
-- [ ] **v1.0** (após TASK 5.3) — UI Reativa com Transparência de Hit
-- [ ] **v1.1** (após TASK 7.4) — Grafo de Identidade Inteligente
+- [ ] **v1.0** (após TASK 11.3) — App distribuível, cross-platform, com auto-update
+- [ ] **v1.1** (após TASK 8.1 + 8.2) — Smart Features (Timeline + Resumos)
+- [ ] **v2.0** (após TASK 12.5) — Mobile React Native (Android + iOS)
 
 ---
 
@@ -977,3 +981,283 @@ src/main/services/
 **Critérios de aceitação:**
 - [ ] Extrair media references do parser de chat e embedar a imagem local via CLIP.
 - [ ] Input de busca no Frontend consegue cruzar texto ("foto da praia") com o embedding da imagem e exibí-la.
+
+---
+
+# FASE 10 — POLISH & PERSISTÊNCIA (UX DE QUALIDADE DE PRODUÇÃO)
+
+> **Meta:** Fechar os gaps de UX e persistência identificados no gap analysis: edição real de perfis de pessoas, cache de queries, onboarding de primeiro acesso e atalhos de teclado.
+> **Fonte:** `ARCHITECTURE.md §3.6`, `TECH_SPEC §3.2`, `ROADMAP Semana 8 & 10`.
+
+---
+
+## [ ] TASK 10.1 — Edição Persistente de Perfil de Pessoa
+
+**Objetivo:** Ligar os botões de bio, tags e foto que já existem no `People.tsx` ao banco de dados via novos IPC handlers. Atualmente, as edições são apenas visuais e se perdem ao recarregar.
+
+**Contexto:**
+- `ARCHITECTURE.md §3.6` especifica os IPCs `updatePersonBio`, `updatePersonTags`, `updatePersonPhoto` mas eles nunca foram implementados.
+- O `PersonPanel` em `People.tsx` já tem o campo de textarea para bio e input para nova tag, mas não persiste nada.
+
+**Arquivos a criar/modificar:**
+- `src/main/ipc/peopleHandlers.ts` → Adicionar handlers `people:update_bio`, `people:update_tags`, `people:update_photo`
+- `src/main/db/repositories/PersonRepository.ts` → Adicionar `updateBio(personId, bio)`, `addTag(personId, tag)`, `removeTag(personId, tagId)`
+- `electron/preload.ts` → Expor os 3 novos métodos
+- `src/shared/ipc-types.ts` → Atualizar `ElectronAPI`
+- `src/pages/People.tsx` → Conectar os botões aos novos métodos do `window.api`
+
+**Critérios de aceitação:**
+- [ ] Editar bio de uma pessoa e recarregar o app mantém o texto.
+- [ ] Adicionar tag manualmente via input persiste na tabela `person_tags`.
+- [ ] Upload de foto (path local via diálogo Electron) persiste no campo `photo_path` da tabela `people`.
+- [ ] Remover tag funciona (DELETE no DB).
+
+---
+
+## [ ] TASK 10.2 — Cache de Queries & MemoryManager
+
+**Objetivo:** Implementar o `QueryCacheService` que usa a tabela `query_cache` já existente no schema para evitar re-embedding de queries repetidas. Adicionar `MemoryManager` com idle timer para liberar o LLM em CPUs fracas.
+
+**Contexto:**
+- `TECH_SPEC §3.2` — tabela `query_cache` já definida mas sem serviço.
+- `SYSTEM_REQUIREMENTS §6.2` — `MemoryManager` com `startIdleTimer()` e `checkMemoryPressure()` especificado mas não implementado.
+
+**Arquivos a criar:**
+```
+src/main/services/
+├── QueryCacheService.ts   → Lookup/store de queries em query_cache
+└── MemoryManager.ts       → Idle timer (5min) + monitoramento de pressão de memória
+```
+
+**Critérios de aceitação:**
+- [ ] Query repetida (`search:query`) retorna resultado do cache sem invocar o EmbeddingService.
+- [ ] `hit_count` da tabela `query_cache` incrementa a cada cache hit.
+- [ ] MemoryManager descarrega o BrainProcess após 5min de inatividade em Tier 3 (CPU-only).
+- [ ] Logs indicam quando memória livre cai abaixo de 500MB.
+
+---
+
+## [ ] TASK 10.3 — Onboarding & First-Run UX
+
+**Objetivo:** Criar a tela de boas-vindas com download de modelos integrado e exibição do tier de hardware detectado. Cobrir o fluxo completo do primeiro acesso.
+
+**Contexto:**
+- `ROADMAP Semanas 7 & 10` — onboarding wizard + benchmark de hardware.
+- `SYSTEM_REQUIREMENTS §4` — detecção de tier e `SystemCapabilities`.
+- Atualmente o app abre direto no Home sem orientar o usuário sobre modelos ou hardware.
+
+**Requisitos:**
+1. Detectar se é primeiro acesso (`firstRun` flag em settings).
+2. Exibir tela de onboarding com: boas-vindas, hardware detectado (Tier 1/2/3 + GPU name), e botão de download dos modelos.
+3. Progress bar durante o download (já existe `onModelProgress`).
+4. Após download concluído, redirecionar para o Import.
+5. Exibir o hardware detectado permanentemente na `Settings.tsx`.
+
+**Arquivos a criar/modificar:**
+- `src/pages/Onboarding.tsx` → Tela nova de primeiro acesso
+- `src/main/services/SystemDetectionService.ts` → Retorna `SystemCapabilities` (tier, GPU, RAM, AVX2)
+- `src/main/ipc/settingsHandlers.ts` → Adicionar `system:info` handler
+- `src/App.tsx` → Redirecionar para Onboarding se `firstRun = true`
+
+**Critérios de aceitação:**
+- [ ] Primeiro acesso mostra tela de onboarding.
+- [ ] Hardware detectado (GPU/CPU/RAM/Tier) exibido na UI.
+- [ ] Download de modelos ocorre com progress bar real na tela de onboarding.
+- [ ] Após download, `firstRun` é marcado como `false` e não reaparece.
+- [ ] Settings.tsx mostra informações de hardware e tier.
+
+---
+
+## [ ] TASK 10.4 — Keyboard Shortcuts & Tray Icon
+
+**Objetivo:** Implementar atalhos de teclado para navegação rápida e um tray icon com atalho global para abrir o quick search sem focar a janela.
+
+**Contexto:**
+- `ROADMAP Semana 8` — `Ctrl+K` search, `Esc` fechar.
+- `ROADMAP Semana 10` — Tray icon + quick search com atalho global.
+
+**Requisitos:**
+1. **Keyboard shortcuts (renderer):**
+   - `Ctrl+K` → abre Search, foca o input
+   - `Ctrl+,` → abre Settings
+   - `Esc` → fecha painéis laterais / cancela ação corrente
+2. **Tray icon (main process):**
+   - Ícone no system tray ao minimizar
+   - Atalho global `Ctrl+Shift+R` → mostra/foca a janela
+   - Menu de contexto: "Abrir", "Quick Search", "Quit"
+
+**Critérios de aceitação:**
+- [ ] `Ctrl+K` foca o input de busca de qualquer página.
+- [ ] `Esc` fecha o painel de detalhes de pessoa.
+- [ ] Tray icon visível ao minimizar no Windows e macOS.
+- [ ] Atalho global funciona mesmo com o app minimizado.
+
+---
+
+# FASE 11 — DISTRIBUIÇÃO & AUTO-UPDATE
+
+> **Meta:** Preparar o app para distribuição pública com installers para as 3 plataformas, assinatura de código e sistema de atualização automática.
+> **Fonte:** `ROADMAP Semana 11`, `SYSTEM_REQUIREMENTS §9`.
+
+---
+
+## [ ] TASK 11.1 — Packaging Completo (Win / Mac / Linux)
+
+**Objetivo:** Configurar o `electron-builder` para gerar installers de produção para Windows, macOS e Linux com code signing e assets finais.
+
+**Contexto:**
+- A TASK 5.3 existente tinha critérios rasos. Esta task substitui e expande com critérios reais de produção.
+- `SYSTEM_REQUIREMENTS §9` especifica formatos e tamanhos estimados.
+
+**Requisitos:**
+1. **Windows:** `.exe` via NSIS installer (~100MB sem modelos)
+2. **macOS:** `.dmg` universal (Intel + Apple Silicon)
+3. **Linux:** `.AppImage` + `.deb`
+4. **Code signing:** Certificado para Windows (Authenticode) e macOS (notarização Apple)
+5. **Assets:** Ícone em todas as resoluções (ico, icns, png), splash screen
+6. **Modelos excluídos** do installer — download no first-run
+
+**Critérios de aceitação:**
+- [ ] `npm run build` gera installers para a plataforma host.
+- [ ] Installer Windows instala, cria atalho e desinstala limpo.
+- [ ] App macOS passa na notarização Apple (sem warnings de Gatekeeper).
+- [ ] AppImage Linux abre sem dependências extras.
+- [ ] Tamanho do installer < 150MB.
+- [ ] Ícone aparece corretamente no sistema de cada plataforma.
+
+---
+
+## [ ] TASK 11.2 — Auto-Updater (electron-updater + GitHub Releases)
+
+**Objetivo:** Configurar `electron-updater` para checar atualizações automaticamente a cada 24h e permitir atualização in-app sem reinstalação manual.
+
+**Contexto:**
+- `SYSTEM_REQUIREMENTS §9` — mecanismo: `electron-updater`, canal: GitHub Releases, verificação: assinatura digital.
+
+**Requisitos:**
+1. Checar por updates no startup e a cada 24h.
+2. Notificar o usuário quando update disponível (toast não-intrusivo).
+3. Download do update em background.
+4. Instalar ao reiniciar ("Reiniciar para atualizar" button).
+5. Verificação de assinatura do update antes de instalar.
+
+**Critérios de aceitação:**
+- [ ] `autoUpdater.checkForUpdatesAndNotify()` configurado no main.ts.
+- [ ] UI mostra toast quando update disponível.
+- [ ] Update baixado em background sem travar a UI.
+- [ ] Restart instala o update corretamente.
+- [ ] Build pipeline do GitHub Actions gera releases assinados.
+
+---
+
+## [ ] TASK 11.3 — Cross-Platform QA (Matriz de Compatibilidade)
+
+**Objetivo:** Validar o app nas combinações de hardware/OS definidas na matriz do `SYSTEM_REQUIREMENTS §7.1` antes do release v1.0.
+
+**Matriz de testes (conforme SYSTEM_REQUIREMENTS):**
+
+| Tier | Sistema | Hardware |
+|------|---------|----------|
+| Tier 1 | Windows 11 | RTX 3060/4060 |
+| Tier 1 | macOS | MacBook Pro M1 Pro+ |
+| Tier 2 | Windows 10/11 | Intel Iris Xe |
+| Tier 2 | macOS | MacBook Air M1 base (8GB) |
+| Tier 3 | Windows 10 | CPU-only (Intel i5 8ª gen) |
+| Tier 3 | Ubuntu 22.04 | CPU-only |
+
+**Checklist por sistema:**
+- [ ] App inicia sem crash
+- [ ] Hardware detectado e Tier atribuído corretamente
+- [ ] Download de modelos (first-run) funciona
+- [ ] Importação de chat funciona
+- [ ] LLM gera resposta sem freeze
+- [ ] Streaming de tokens fluido na UI
+- [ ] Memória dentro do budget (~600MB)
+- [ ] Auto-updater funciona
+- [ ] Installer instala e desinstala limpo
+
+**Critérios de aceitação:**
+- [ ] Zero crashes em uso normal nos 6 cenários acima.
+- [ ] Performance aceitável em Tier 3 CPU-only (> 8 tokens/s).
+- [ ] Bugs encontrados documentados e corrigidos antes do release.
+
+---
+
+# FASE 12 — MOBILE v2.0 (REACT NATIVE)
+
+> **Meta:** Port do Recall.ai para Android e iOS usando React Native + Expo, com IA on-device via LiteRT.
+> **Pré-requisito:** v1.0 desktop estável e validada com usuários reais.
+> **Estimativa:** 8-10 semanas.
+> **Fonte:** `ROADMAP Fase 5`.
+
+---
+
+## [ ] TASK 12.1 — Setup React Native + Expo
+
+**Objetivo:** Criar o projeto mobile com Expo SDK 52+, reutilizando os tipos compartilhados do desktop.
+
+**Requisitos:**
+1. `npx create-expo-app recall-ai-mobile --template` com TypeScript.
+2. Portar `src/shared/types.ts` e constantes para o projeto mobile.
+3. Configurar Expo Router para navegação.
+4. Setup de design system mobile (Tamagui ou NativeWind).
+
+**Critérios de aceitação:**
+- [ ] App mobile roda em simulador iOS e emulador Android.
+- [ ] Tipos compartilhados importados sem modificação.
+- [ ] Navegação entre telas básicas funciona.
+
+---
+
+## [ ] TASK 12.2 — Port Database Layer (op-sqlite)
+
+**Objetivo:** Substituir `better-sqlite3` por `op-sqlite` (JSI) no contexto mobile, adaptando as migrations e repositories.
+
+**Critérios de aceitação:**
+- [ ] Schema SQLite criado via `op-sqlite` no dispositivo.
+- [ ] ChatRepository, MessageRepository e SessionRepository funcionam no mobile.
+- [ ] FTS5 funcional para busca textual.
+
+---
+
+## [ ] TASK 12.3 — Port ML Runtime (LiteRT / TFLite)
+
+**Objetivo:** Substituir `node-llama-cpp` por `LiteRT` (ex-TensorFlow Lite) para inferência on-device no mobile.
+
+**Contexto:**
+- `ROADMAP §Fase 5` — manter Gemma 3 270M, adaptar runtime.
+- Tier 4 (dispositivos muito fracos) → search-only sem LLM.
+
+**Critérios de aceitação:**
+- [ ] Embedding via LiteRT funciona em Android e iOS.
+- [ ] LLM Gemma 270M gera resposta on-device (Tier 1-3 mobile).
+- [ ] Fallback para search-only em Tier 4 (< 3GB RAM).
+
+---
+
+## [ ] TASK 12.4 — UI Mobile (Touch-First)
+
+**Objetivo:** Adaptar as páginas principais (Import, Search, Chat, People) para UX mobile com gestos, touch targets adequados e layouts responsivos.
+
+**Critérios de aceitação:**
+- [ ] Import funciona via expo-file-system (share intent do WhatsApp).
+- [ ] Search com resultados fluidos (FlatList virtualizada).
+- [ ] Chat RAG com streaming funcional.
+- [ ] People graph interativo via touch (pan + zoom no grafo SVG).
+
+---
+
+## [ ] TASK 12.5 — Publicação nas Stores
+
+**Objetivo:** Preparar e submeter o app para Google Play Store e Apple App Store.
+
+**Requisitos:**
+1. Build de produção via EAS Build (Expo Application Services).
+2. Assets da store: ícone, screenshots, descrição PT-BR e EN.
+3. Privacy policy (processamento 100% local — sem coleta de dados).
+4. Revisão de conformidade (LGPD / GDPR).
+
+**Critérios de aceitação:**
+- [ ] App aprovado na Play Store (Android 10+).
+- [ ] App aprovado na App Store (iOS 15+).
+- [ ] Versão de produção disponível para download público.
