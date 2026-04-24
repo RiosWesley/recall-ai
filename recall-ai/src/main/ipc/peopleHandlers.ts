@@ -78,4 +78,14 @@ export function registerPeopleHandlers() {
       throw error
     }
   })
+
+  /** Returns the AI-extracted tags and memories for a specific person. */
+  ipcMain.handle('people:get_knowledge', async (_event, personId: string) => {
+    const db = DatabaseService.getInstance()
+    const repo = new PersonRepository(db)
+    return {
+      tags: repo.getTagsByPersonId(personId),
+      memories: repo.getMemoriesByPersonId(personId),
+    }
+  })
 }

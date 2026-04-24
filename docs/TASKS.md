@@ -872,10 +872,10 @@ src/main/services/
 | **Fase 4** — Deterministic Pipeline | 2 | 1 | 🟡 Em andamento |
 | **Fase 5** — Interactive Interface & QA | 3 | 0 | ⬜ Não iniciada |
 | **Fase 6** — Identity Graph & Mentions | 4 | 4 | ✅ Concluída |
-| **Fase 7** — Map-Reduce Engine | 4 | 1 | 🟡 Em andamento |
+| **Fase 7** — Map-Reduce Engine | 4 | 4 | ✅ Concluída |
 | **Fase 8** — Smart Features | 2 | 0 | ⬜ Não iniciada |
 | **Fase 9** — Multi-App & Multimodal | 2 | 0 | ⬜ Não iniciada |
-| **TOTAL** | **30** | **16** | **53%** |
+| **TOTAL** | **30** | **18** | **60%** |
 
 **Milestones:**
 - [x] **MVP 1** — Pipeline de Storage Básico Funcional
@@ -913,7 +913,7 @@ src/main/services/
 
 ---
 
-## [ ] TASK 7.3 — Consolidação Incremental no Banco
+## [x] TASK 7.3 — Consolidação Incremental no Banco
 
 **Objetivo:** Persistir os achados da IA na biografia da pessoa.
 **Critérios de aceitação:**
@@ -923,7 +923,7 @@ src/main/services/
 
 ---
 
-## [ ] TASK 7.4 — Integração Definitiva na UI (People.tsx)
+## [x] TASK 7.4 — Integração Definitiva na UI (People.tsx)
 
 **Objetivo:** Conectar a inteligência do Backend à UI do Frontend de Pessoas.
 **Critérios de aceitação:**

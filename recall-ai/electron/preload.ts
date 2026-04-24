@@ -1,5 +1,5 @@
 import { ipcRenderer, contextBridge } from 'electron'
-import type { ImportProgress, ImportResult, Chat, ModelStatus, ModelDownloadProgress, ModelKey, SearchOptions, SearchResult } from '../src/shared/types'
+import type { ImportProgress, ImportResult, Chat, ModelStatus, ModelDownloadProgress, ModelKey, SearchOptions, SearchResult, PersonTag, PersonKeyMemory } from '../src/shared/types'
 
 /**
  * Expose a typed, minimal API to the renderer process via contextBridge.
@@ -123,6 +123,10 @@ contextBridge.exposeInMainWorld('api', {
     return ipcRenderer.invoke('mapreduce:run_now')
   },
 
+  /** Returns AI-extracted tags and key memories for a specific person. */
+  getPersonKnowledge(personId: string): Promise<{ tags: PersonTag[]; memories: PersonKeyMemory[] }> {
+    return ipcRenderer.invoke('people:get_knowledge', personId)
+  },
 
   // ── Window controls ─────────────────────────────────────────────────────────
   windowMinimize(): void {

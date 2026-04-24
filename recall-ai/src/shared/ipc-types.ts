@@ -71,7 +71,8 @@ export interface ElectronAPI {
   getMapReduceStatus(): Promise<import('./types').MapReduceStatus>
   /** Trigger an immediate extraction pass (useful for manual refresh in the UI). */
   runMapReduceNow(): Promise<import('./types').MapReduceStatus>
-
+  /** Returns AI-extracted tags and key memories for a specific person. */
+  getPersonKnowledge(personId: string): Promise<{ tags: import('./types').PersonTag[]; memories: import('./types').PersonKeyMemory[] }>
 
   // ── Window controls ─────────────────────────────────────────────────────────
   windowMinimize(): void

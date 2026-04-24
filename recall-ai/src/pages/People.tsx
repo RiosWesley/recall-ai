@@ -132,20 +132,26 @@ export default function PeoplePage({ navigate: _navigate }: PeoplePageProps) {
       
       setPeopleDB(dbP)
 
+      // Fetch knowledge (tags + memories) for all people in parallel
+      const knowledgeResults = await Promise.all(
+        dbP.map(p => window.api.getPersonKnowledge(p.id).catch(() => ({ tags: [], memories: [] })))
+      )
+
       // Transform DB records into UI Person format
-      const uiPeople = dbP.map(p => {
+      const uiPeople = dbP.map((p, idx) => {
         const initials = p.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
+        const knowledge = knowledgeResults[idx]
         return {
           id: p.id,
           name: p.name,
           initials,
           color: p.color,
-          tags: [], // to be populated by MapReduce later
+          tags: knowledge.tags.map(t => t.tag),
           messageCount: p.message_count,
-          chats: [], // to be populated by MapReduce later
+          chats: [],
           lastSeen: 'ativo',
           bio: p.bio || '',
-          keyMemories: [] // to be populated by MapReduce later
+          keyMemories: knowledge.memories.map(m => m.memory)
         } as Person
       })
       
