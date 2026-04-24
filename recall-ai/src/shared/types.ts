@@ -147,6 +147,24 @@ export interface PendingMention {
 
 export type MentionResolutionAction = 'create_new' | 'link_existing' | 'ignore'
 
+// ─── PERSON KNOWLEDGE (Tags & Memories — Phase 7) ─────────────────────────────
+
+export interface PersonTag {
+  id: string
+  person_id: string
+  tag: string
+  source: string
+  created_at: number
+}
+
+export interface PersonKeyMemory {
+  id: string
+  person_id: string
+  memory: string
+  session_id: string | null
+  created_at: number
+}
+
 // ─── PROFILE FACT ─────────────────────────────────────────────────────────────
 
 export type FactCategory = 'frequent_term' | 'topic' | 'dynamics' | 'co_occurrence'

@@ -872,7 +872,7 @@ src/main/services/
 | **Fase 4** — Deterministic Pipeline | 2 | 1 | 🟡 Em andamento |
 | **Fase 5** — Interactive Interface & QA | 3 | 0 | ⬜ Não iniciada |
 | **Fase 6** — Identity Graph & Mentions | 4 | 4 | ✅ Concluída |
-| **Fase 7** — Map-Reduce Engine | 4 | 0 | ⬜ Não iniciada |
+| **Fase 7** — Map-Reduce Engine | 4 | 1 | 🟡 Em andamento |
 | **Fase 8** — Smart Features | 2 | 0 | ⬜ Não iniciada |
 | **Fase 9** — Multi-App & Multimodal | 2 | 0 | ⬜ Não iniciada |
 | **TOTAL** | **30** | **16** | **53%** |
@@ -891,14 +891,14 @@ src/main/services/
 
 ---
 
-## [ ] TASK 7.1 — Schema de Conhecimento Individual (Tags & Memories)
+## [x] TASK 7.1 — Schema de Conhecimento Individual (Tags & Memories)
 
 **Objetivo:** Preparar o SQLite para armazenar as entidades sintéticas extraídas das pessoas.
 **Documentação completa:** `docs/task-docs/05-phase7-mapreduce.md`
 **Critérios de aceitação:**
-- [ ] Migration `009_person_knowledge_schema.ts` criada (tabelas `person_tags` e `person_key_memories`).
-- [ ] Tipos atualizados em `shared/types.ts`.
-- [ ] DAO atualizado no `PersonRepository` com métodos para inserir tags e memórias.
+- [x] Migration `009_person_knowledge_schema.ts` criada (tabelas `person_tags` e `person_key_memories`).
+- [x] Tipos atualizados em `shared/types.ts`.
+- [x] DAO atualizado no `PersonRepository` com métodos para inserir tags e memórias.
 
 ---
 

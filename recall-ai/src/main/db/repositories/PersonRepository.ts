@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
 import { nanoid } from 'nanoid'
-import type { Person, PersonRelation } from '../../../shared/types'
+import type { Person, PersonRelation, PersonTag, PersonKeyMemory } from '../../../shared/types'
 
 export class PersonRepository {
   constructor(private readonly db: Database.Database) {}
@@ -75,5 +75,52 @@ export class PersonRepository {
     return this.db.prepare(`
       SELECT * FROM people ORDER BY message_count DESC, last_seen DESC
     `).all() as Person[]
+  }
+
+  // ─── PHASE 7 — KNOWLEDGE (Tags & Memories) ────────────────────────────────
+
+  /**
+   * Inserts a batch of tags for a person.
+   * Uses INSERT OR IGNORE via the unique index — safe to call multiple times.
+   */
+  insertTags(personId: string, tags: string[], source = 'map_reduce'): void {
+    const stmt = this.db.prepare(`
+      INSERT OR IGNORE INTO person_tags (id, person_id, tag, source)
+      VALUES (@id, @person_id, @tag, @source)
+    `)
+    const runAll = this.db.transaction(() => {
+      for (const tag of tags) {
+        stmt.run({ id: nanoid(), person_id: personId, tag, source })
+      }
+    })
+    runAll()
+  }
+
+  /**
+   * Inserts a single biographical memory for a person.
+   */
+  insertMemory(personId: string, memory: string, sessionId: string | null = null): void {
+    this.db.prepare(`
+      INSERT INTO person_key_memories (id, person_id, memory, session_id)
+      VALUES (@id, @person_id, @memory, @session_id)
+    `).run({ id: nanoid(), person_id: personId, memory, session_id: sessionId })
+  }
+
+  /**
+   * Returns all tags for a given person.
+   */
+  getTagsByPersonId(personId: string): PersonTag[] {
+    return this.db.prepare(`
+      SELECT * FROM person_tags WHERE person_id = ? ORDER BY created_at ASC
+    `).all(personId) as PersonTag[]
+  }
+
+  /**
+   * Returns all key memories for a given person, ordered chronologically.
+   */
+  getMemoriesByPersonId(personId: string): PersonKeyMemory[] {
+    return this.db.prepare(`
+      SELECT * FROM person_key_memories WHERE person_id = ? ORDER BY created_at ASC
+    `).all(personId) as PersonKeyMemory[]
   }
 }
