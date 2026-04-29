@@ -156,7 +156,14 @@ export class ChatImportService {
   }
 
   /**
-   * Background process to extract summaries and entities via Worker
+   * Background process to extract summaries and entities via Worker.
+   * 
+   * Optimization notes (2026-04):
+   * - Sessions processed individually (not concatenated into mega-prompts)
+   *   because small LLMs produce more reliable JSON with shorter prompts
+   * - Trivial sessions (< 3 messages, all system/media) are skipped entirely
+   * - Per-session timeout prevents a single bad session from stalling the pipeline
+   * - DB writes batched into a single transaction per flush cycle
    */
   private async runBackgroundNLP(
     chatId: string,
@@ -165,97 +172,164 @@ export class ChatImportService {
     sender?: WebContents
   ) {
     const emit = (progress: ImportProgress) => {
-      // IPC to everyone, or standard IPC reply (we are using the global event name `import:progress`)
       sender?.send('import:progress', progress)
     }
 
     try {
-      emit({ stage: 'nlp_summaries', percent: 20, label: 'Extração NLP Iniciada', detail: `Processando ${rawSessions.length} sessões...`, chatId } as any)
+      const totalSessions = rawSessions.length
+      emit({ stage: 'nlp_summaries', percent: 20, label: 'Extração NLP Iniciada', detail: `Processando ${totalSessions} sessões...`, chatId } as any)
 
-      // Spin up the worker
       const worker = WorkerProcess.getInstance()
       await worker.initialize()
 
       const db = DatabaseService.getInstance()
       const sessionRepo = new SessionRepository(db)
+      const personRepo = new PersonRepository(db)
+      const inbox = PendingMentionsManager.getInstance()
 
       let processed = 0
-      const BATCH_SIZE = 4
+      const timings: number[] = []
 
-      for (let i = 0; i < rawSessions.length; i += BATCH_SIZE) {
-        const batchRaw = rawSessions.slice(i, i + BATCH_SIZE)
-        const batchDb = dbSessions.slice(i, i + BATCH_SIZE)
-        
-        const sessionsText = batchRaw.map(rawSess => 
-          rawSess.messages.map(m => `[${new Date(m.timestamp * 1000).toISOString()}] ${m.sender}: ${m.content}`).join('\n')
-        )
-        
-        let batchResults: import('../../shared/types').SessionExtractionResult[] = []
-        try {
-          batchResults = await worker.extractBatchSessionEntities(sessionsText)
-        } catch (e: any) {
-          console.warn('[ChatImportService Worker] Batch extraction failed:', e.message)
-          batchResults = sessionsText.map(() => ({ summary: "Sessão extraída via fallback de erro", mentioned_entities: [] }))
+      // Accumulate all DB mutations for batch commit
+      const pendingUpdates: Array<{
+        sessionId: string
+        summary: string
+        entities: NewEntity[]
+      }> = []
+      const pendingMentionLinks: Array<{ sessionId: string; personId: string; context: string | null }> = []
+      const pendingInboxMentions: Array<{ sessionId: string; name: string; context: string | null }> = []
+
+      for (let i = 0; i < totalSessions; i++) {
+        const rawSess = rawSessions[i]!
+        const dbSess = dbSessions[i]!
+        const sessionStart = Date.now()
+
+        // ── Skip trivial sessions ──────────────────────────────────────
+        const textMessages = rawSess.messages.filter(m => m.type === 'text')
+        if (textMessages.length < 3) {
+          const summary = textMessages.length === 0
+            ? 'Sessão sem mensagens de texto.'
+            : `Sessão breve com ${rawSess.message_count} mensagens.`
+          pendingUpdates.push({ sessionId: dbSess.id!, summary, entities: [] })
+          processed++
+          continue
         }
 
-        for (let j = 0; j < batchRaw.length; j++) {
-          const dbSess = batchDb[j]
-          const result = batchResults[j] || { summary: "Sessão concluída (sem detalhes extraídos)", mentioned_entities: [] }
-          
-          let summary = result.summary || "Sessão concluída (sem detalhes extraídos)"
-          let extractedEntities = Array.isArray(result.mentioned_entities) ? result.mentioned_entities : []
+        // ── Build session text ─────────────────────────────────────────
+        const sessionText = rawSess.messages
+          .map(m => `[${new Date(m.timestamp * 1000).toISOString()}] ${m.sender}: ${m.content}`)
+          .join('\n')
 
-          const newEntities: NewEntity[] = []
-          const personRepo = new PersonRepository(db)
-          const inbox = PendingMentionsManager.getInstance()
+        // ── Extract with per-session timeout ───────────────────────────
+        let result: import('../../shared/types').SessionExtractionResult
+        try {
+          result = await Promise.race([
+            worker.extractSessionEntities(sessionText),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Session extraction timeout (15s)')), 15_000)
+            )
+          ])
+        } catch (e: any) {
+          console.warn(`[ChatImportService] Session ${i}/${totalSessions} failed: ${e.message}`)
+          result = { summary: 'Sessão extraída via fallback de timeout', mentioned_entities: [] }
+        }
 
-          for (const ent of extractedEntities) {
-            if (!ent.name) continue
-            
-            // Map to legacy 'entities' table for general Search Index
-            newEntities.push({
-              id: nanoid(),
-              session_id: dbSess.id!,
-              name: ent.name,
-              normalized_name: ent.name.toLowerCase().trim(),
-              type: ent.type || 'unknown',
-              action: ent.context || 'mentioned'
-            })
+        const summary = result.summary || 'Sessão concluída (sem detalhes extraídos)'
+        const extractedEntities = Array.isArray(result.mentioned_entities) ? result.mentioned_entities : []
 
-            // Phase 6 Identity Graph mapping
-            if (!ent.is_participant && ent.type === 'person') {
-              const matches = personRepo.findProbableMatch(ent.name)
-              // Auto-resolve if exactly 1 perfect match is found
-              const exactMatch = matches.find(m => m.name.toLowerCase() === ent.name.toLowerCase())
-              if (exactMatch) {
-                personRepo.linkMention(dbSess.id!, exactMatch.id, ent.context)
-              } else {
-                // Ambiguous or New -> send to Inbox
-                const pending = inbox.addMention(dbSess.id!, ent.name, ent.context)
-                sender?.send('ingest:mention_detected', pending)
-              }
+        // ── Prepare entities and mentions ──────────────────────────────
+        const newEntities: NewEntity[] = []
+        for (const ent of extractedEntities) {
+          if (!ent.name) continue
+
+          newEntities.push({
+            id: nanoid(),
+            session_id: dbSess.id!,
+            name: ent.name,
+            normalized_name: ent.name.toLowerCase().trim(),
+            type: ent.type || 'unknown',
+            action: ent.context || 'mentioned'
+          })
+
+          // Phase 6 Identity Graph mapping
+          if (!ent.is_participant && ent.type === 'person') {
+            const matches = personRepo.findProbableMatch(ent.name)
+            const exactMatch = matches.find(m => m.name.toLowerCase() === ent.name.toLowerCase())
+            if (exactMatch) {
+              pendingMentionLinks.push({ sessionId: dbSess.id!, personId: exactMatch.id, context: ent.context })
+            } else {
+              pendingInboxMentions.push({ sessionId: dbSess.id!, name: ent.name, context: ent.context })
             }
           }
-
-          // Update this session in Database
-          sessionRepo.updateSessionNLP(dbSess.id!, summary, newEntities)
         }
 
-        processed += batchRaw.length
-        const isEntitiesPhase = processed > rawSessions.length * 0.7
+        pendingUpdates.push({ sessionId: dbSess.id!, summary, entities: newEntities })
 
+        const elapsed = Date.now() - sessionStart
+        timings.push(elapsed)
+        processed++
+
+        // ── Flush to DB every 8 sessions (amortize transaction overhead) ──
+        if (pendingUpdates.length >= 8) {
+          this.flushPendingUpdates(db, sessionRepo, personRepo, inbox, sender, pendingUpdates, pendingMentionLinks, pendingInboxMentions)
+          pendingUpdates.length = 0
+          pendingMentionLinks.length = 0
+          pendingInboxMentions.length = 0
+        }
+
+        // ── Progress update ────────────────────────────────────────────
+        const avgMs = timings.reduce((a, b) => a + b, 0) / timings.length
+        const isEntitiesPhase = processed > totalSessions * 0.7
         emit({ 
           stage: isEntitiesPhase ? 'nlp_entities' : 'nlp_summaries', 
-          percent: 20 + Math.round((processed / rawSessions.length) * 80), 
-          label: isEntitiesPhase ? 'Resolvendo Entidades' : 'Processando Resumos (Batch)', 
-          detail: `${processed} / ${rawSessions.length} sessões analisadas...`,
-          chatId // Note: sending chatId along to identify bg process per chat
-        } as any) // Type assertion to bypass strict interface since we added chatId in payload dynamically
+          percent: 20 + Math.round((processed / totalSessions) * 80), 
+          label: isEntitiesPhase ? 'Resolvendo Entidades' : 'Processando Sessões', 
+          detail: `${processed}/${totalSessions} sessões (${Math.round(avgMs)}ms/sessão)`,
+          chatId
+        } as any)
       }
 
-      emit({ stage: 'done', percent: 100, label: 'Concluído', detail: `Entidades Indexadas para o chat.`, chatId } as any)
+      // ── Final flush ──────────────────────────────────────────────────
+      if (pendingUpdates.length > 0) {
+        this.flushPendingUpdates(db, sessionRepo, personRepo, inbox, sender, pendingUpdates, pendingMentionLinks, pendingInboxMentions)
+      }
+
+      const totalAvg = timings.length > 0 ? Math.round(timings.reduce((a, b) => a + b, 0) / timings.length) : 0
+      console.log(`[ChatImportService] NLP complete: ${totalSessions} sessions, avg ${totalAvg}ms/session, ${timings.length} LLM calls`)
+
+      emit({ stage: 'done', percent: 100, label: 'Concluído', detail: `Entidades Indexadas (${totalAvg}ms/sessão).`, chatId } as any)
     } catch(err) {
       console.error('[Background NLP Exception]', err)
+    }
+  }
+
+  /**
+   * Flush accumulated session updates to DB in a single transaction.
+   */
+  private flushPendingUpdates(
+    db: ReturnType<typeof DatabaseService.getInstance>,
+    sessionRepo: SessionRepository,
+    personRepo: PersonRepository,
+    inbox: PendingMentionsManager,
+    sender: WebContents | undefined,
+    updates: Array<{ sessionId: string; summary: string; entities: NewEntity[] }>,
+    mentionLinks: Array<{ sessionId: string; personId: string; context: string | null }>,
+    inboxMentions: Array<{ sessionId: string; name: string; context: string | null }>
+  ) {
+    // Wrap all writes in a single transaction
+    db.transaction(() => {
+      for (const upd of updates) {
+        sessionRepo.updateSessionNLP(upd.sessionId, upd.summary, upd.entities)
+      }
+      for (const link of mentionLinks) {
+        personRepo.linkMention(link.sessionId, link.personId, link.context)
+      }
+    })()
+
+    // Inbox mentions are sent via IPC (outside transaction)
+    for (const m of inboxMentions) {
+      const pending = inbox.addMention(m.sessionId, m.name, m.context)
+      sender?.send('ingest:mention_detected', pending)
     }
   }
 }

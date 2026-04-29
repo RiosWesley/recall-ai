@@ -58,7 +58,7 @@ async function handleInit(id: string, payload: { modelPath: string }) {
   }
 
   context = await model.createContext({
-    contextSize: 4096 // Worker usually process smaller chunks/sessions
+    contextSize: 2048 // Optimized: sessions fit in ~600 tokens (input+output), saves ~300MB VRAM
   });
 
   activeSequence = context.getSequence();

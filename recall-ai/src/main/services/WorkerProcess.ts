@@ -316,13 +316,13 @@ ${sessionText}
 
     const options: GenerateOptions = {
       temperature: 0.1,
-      maxTokens: 500,
+      maxTokens: 250, // Single session JSON ~100-200 tokens; avoids wasted generation
       systemPrompt: "You are a headless JSON API. You MUST respond with valid JSON matching the exact schema."
     };
 
     const startTime = Date.now();
     try {
-      const res = await this.generateJson<import('../../shared/types').SessionExtractionResult>(prompt, options, 3);
+      const res = await this.generateJson<import('../../shared/types').SessionExtractionResult>(prompt, options, 2);
       const duration = Date.now() - startTime;
       console.log(`[WorkerProcess] extractSessionEntities completed in ${duration}ms`);
       
