@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { DatabaseService } from '../db/database'
 import { PersonRepository } from '../db/repositories/PersonRepository'
+import { MessageRepository } from '../db/repositories/MessageRepository'
 import { PendingMentionsManager } from '../services/PendingMentionsManager'
 import type { MentionResolutionAction } from '../../shared/types'
 
@@ -14,7 +15,9 @@ function getRandomColor() {
 }
 
 export function registerPeopleHandlers() {
+  const db = DatabaseService.getInstance()
   const inbox = PendingMentionsManager.getInstance()
+  inbox.initialize(db)
 
   ipcMain.handle('mentions:get_pending', async () => {
     return inbox.getPending()
@@ -87,5 +90,11 @@ export function registerPeopleHandlers() {
       tags: repo.getTagsByPersonId(personId),
       memories: repo.getMemoriesByPersonId(personId),
     }
+  })
+
+  ipcMain.handle('mentions:get_context', async (_event, sessionId: string, contextSnippet: string) => {
+    const db = DatabaseService.getInstance()
+    const repo = new MessageRepository(db)
+    return repo.getNeighborsByContext(sessionId, contextSnippet)
   })
 }

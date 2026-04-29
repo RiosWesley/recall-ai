@@ -114,6 +114,10 @@ contextBridge.exposeInMainWorld('api', {
     return () => ipcRenderer.off('ingest:mention_detected', listener)
   },
 
+  getMentionContext(sessionId: string, contextSnippet: string): Promise<import('../src/shared/types').Message[]> {
+    return ipcRenderer.invoke('mentions:get_context', sessionId, contextSnippet)
+  },
+
   // ── Map-Reduce (Phase 7) ─────────────────────────────────────────────────────
   getMapReduceStatus(): Promise<import('../src/shared/types').MapReduceStatus> {
     return ipcRenderer.invoke('mapreduce:status')

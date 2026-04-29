@@ -862,6 +862,28 @@ src/main/services/
 
 ---
 
+## [ ] TASK 6.5 — Contexto Expandido na Resolução de Menções
+
+**Objetivo:** Permitir que o usuário visualize as mensagens vizinhas ao clicar no contexto de uma menção pendente, facilitando a identificação da pessoa.
+
+**Requisitos:**
+1. **IPC Handler:** Criar `people:get_mention_context` que recebe \`sessionId\` e \`contextSnippet\`.
+   - Busca as mensagens da sessão no banco de dados.
+   - Localiza a mensagem que melhor combina com o snippet.
+   - Retorna um bloco de mensagens (4 anteriores + a mensagem foco + 4 posteriores).
+2. **UI (MentionInbox.tsx):** 
+   - Tornar o bloco de contexto clicável (hover effect + cursor pointer).
+   - Exibir um Popover ou Modal com o fluxo de mensagens formatado.
+3. **UX:** Garantir que o usuário consiga ler o fluxo de conversa para decidir entre Novo/Vincular/Ignorar.
+
+**Critérios de aceitação:**
+- [ ] Clicar no contexto abre visualização expandida.
+- [ ] Visualização mostra cronologia (mensagens vizinhas).
+- [ ] Identificação de quem é quem fica clara pela troca de mensagens.
+
+
+---
+
 # Progresso Global
 
 | Fase | Tasks | Concluídas | Status |

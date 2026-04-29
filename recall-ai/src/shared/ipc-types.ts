@@ -65,6 +65,7 @@ export interface ElectronAPI {
   getRelations(): Promise<import('./types').PersonRelation[]>
   resolveMention(mentionId: string, action: import('./types').MentionResolutionAction, personId?: string): Promise<void>
   onMentionDetected(cb: (mention: import('./types').PendingMention) => void): () => void
+  getMentionContext(sessionId: string, contextSnippet: string): Promise<import('./types').Message[]>
 
   // ── Map-Reduce (Phase 7) ─────────────────────────────────────────────────────
   /** Returns the current status of the background Map-Reduce knowledge service. */

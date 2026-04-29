@@ -125,4 +125,62 @@ export class MessageRepository {
 
     return windows
   }
+
+  /**
+   * Finds the message containing the snippet within a session and returns its neighbors.
+   * Useful for "Disambiguation UI" where the user needs to see the real chat flow.
+   */
+  getNeighborsByContext(sessionId: string, contextSnippet: string, limit = 4): Message[] {
+    // 1. Get session boundaries
+    const session = this.db.prepare(`
+      SELECT chat_id, start_time, end_time FROM sessions WHERE id = ?
+    `).get(sessionId) as { chat_id: string, start_time: number, end_time: number } | undefined
+
+    if (!session) return []
+
+    // 2. Find the pivot message that contains the contextSnippet
+    // We use LIKE for simple partial match within the session
+    const pivot = this.db.prepare(`
+      SELECT * FROM messages
+      WHERE chat_id = ? AND timestamp >= ? AND timestamp <= ?
+      AND content LIKE ?
+      LIMIT 1
+    `).get(session.chat_id, session.start_time, session.end_time, `%${contextSnippet}%`) as Message | undefined
+
+    if (!pivot) {
+      // Fallback: If we can't find the exact text (LLM might have cleaned it), 
+      // just return the beginning of the session.
+      return this.db.prepare(`
+        SELECT * FROM messages
+        WHERE chat_id = ? AND timestamp >= ? AND timestamp <= ?
+        ORDER BY timestamp ASC LIMIT ?
+      `).all(session.chat_id, session.start_time, session.end_time, limit * 2) as Message[]
+    }
+
+    // 3. Fetch neighbors (limit before, pivot, limit after)
+    return this.db.prepare(`
+      SELECT * FROM (
+        SELECT * FROM messages 
+        WHERE chat_id = ? AND timestamp < ? AND timestamp >= ?
+        ORDER BY timestamp DESC LIMIT ?
+      ) 
+      UNION ALL
+      SELECT * FROM (
+        SELECT * FROM messages 
+        WHERE id = ?
+      )
+      UNION ALL
+      SELECT * FROM (
+        SELECT * FROM messages 
+        WHERE chat_id = ? AND timestamp > ? AND timestamp <= ?
+        ORDER BY timestamp ASC LIMIT ?
+      )
+      ORDER BY timestamp ASC
+    `).all(
+      session.chat_id, pivot.timestamp, session.start_time, limit,
+      pivot.id,
+      session.chat_id, pivot.timestamp, session.end_time, limit
+    ) as Message[]
+  }
 }
+

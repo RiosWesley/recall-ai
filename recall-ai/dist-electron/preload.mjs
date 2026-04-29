@@ -83,6 +83,9 @@ electron.contextBridge.exposeInMainWorld("api", {
     electron.ipcRenderer.on("ingest:mention_detected", listener);
     return () => electron.ipcRenderer.off("ingest:mention_detected", listener);
   },
+  getMentionContext(sessionId, contextSnippet) {
+    return electron.ipcRenderer.invoke("mentions:get_context", sessionId, contextSnippet);
+  },
   // ── Map-Reduce (Phase 7) ─────────────────────────────────────────────────────
   getMapReduceStatus() {
     return electron.ipcRenderer.invoke("mapreduce:status");

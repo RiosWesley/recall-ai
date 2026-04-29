@@ -13,6 +13,8 @@ export function MentionInbox({ people, onResolved }: MentionInboxProps) {
   const [selectedAction, setSelectedAction] = useState<{ [id: string]: MentionResolutionAction }>({})
   const [selectedPersonId, setSelectedPersonId] = useState<{ [id: string]: string }>({})
   const [isProcessing, setIsProcessing] = useState<{ [id: string]: boolean }>({})
+  const [expandedContext, setExpandedContext] = useState<{ mentionId: string, messages: import('../shared/types').Message[] } | null>(null)
+  const [isLoadingContext, setIsLoadingContext] = useState(false)
 
   const loadMentions = async () => {
     try {
@@ -52,6 +54,18 @@ export function MentionInbox({ people, onResolved }: MentionInboxProps) {
       alert('Erro ao processar menção')
     } finally {
       setIsProcessing((prev) => ({ ...prev, [mentionId]: false }))
+    }
+  }
+
+  const handleShowContext = async (mention: import('../shared/types').PendingMention) => {
+    setIsLoadingContext(true)
+    try {
+      const messages = await window.api.getMentionContext(mention.sessionId, mention.context || '')
+      setExpandedContext({ mentionId: mention.id, messages })
+    } catch (err) {
+      console.error('Failed to load context:', err)
+    } finally {
+      setIsLoadingContext(false)
     }
   }
 
@@ -141,8 +155,28 @@ export function MentionInbox({ people, onResolved }: MentionInboxProps) {
                     Identificado: <span style={{ color: 'var(--accent-emerald)' }}>{m.alias}</span>
                   </div>
                   {m.context && (
-                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontStyle: 'italic', marginBottom: '12px', background: 'var(--bg-surface)', padding: '6px', borderRadius: '4px' }}>
+                    <div 
+                      onClick={() => handleShowContext(m)}
+                      title="Clique para ver mensagens vizinhas"
+                      style={{ 
+                        fontSize: '11px', color: 'var(--text-secondary)', fontStyle: 'italic', 
+                        marginBottom: '12px', background: 'var(--bg-surface)', padding: '8px', 
+                        borderRadius: '4px', cursor: 'pointer', border: '1px dashed var(--border-subtle)',
+                        transition: 'all 0.2s'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = 'var(--accent-emerald)'
+                        e.currentTarget.style.background = 'var(--bg-elevated)'
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = 'var(--border-subtle)'
+                        e.currentTarget.style.background = 'var(--bg-surface)'
+                      }}
+                    >
                       "{m.context}"
+                      <div style={{ fontSize: '9px', marginTop: '4px', opacity: 0.6, textAlign: 'right' }}>
+                        ver contexto completo 💬
+                      </div>
                     </div>
                   )}
 
@@ -218,6 +252,78 @@ export function MentionInbox({ people, onResolved }: MentionInboxProps) {
               ))
             )}
           </div>
+        </div>
+      )}
+
+      {/* Expanded Context Modal */}
+      {expandedContext && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.6)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: '20px'
+        }} onClick={() => setExpandedContext(null)}>
+          <div style={{
+            width: '100%',
+            maxWidth: '500px',
+            background: 'var(--bg-surface)',
+            borderRadius: '12px',
+            border: '1px solid var(--border-subtle)',
+            boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+            display: 'flex',
+            flexDirection: 'column',
+            maxHeight: '80vh',
+            overflow: 'hidden'
+          }} onClick={e => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div style={{ padding: '16px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)' }}>
+              <div style={{ fontSize: '14px', fontWeight: 'bold', color: 'var(--accent-emerald)' }}>Contexto da Conversa</div>
+              <button onClick={() => setExpandedContext(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Messages List */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {expandedContext.messages.map((msg, i) => {
+                const isPivot = mentions.find(m => m.id === expandedContext.mentionId)?.context?.includes(msg.content)
+                return (
+                  <div key={msg.id} style={{
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    background: isPivot ? 'rgba(34, 197, 94, 0.1)' : 'var(--bg-elevated)',
+                    border: `1px solid ${isPivot ? 'var(--accent-emerald)' : 'var(--border-subtle)'}`,
+                    alignSelf: 'stretch'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-primary)' }}>{msg.sender}</span>
+                      <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                        {new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+                      {msg.content}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            
+            <div style={{ padding: '12px', textAlign: 'center', borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-elevated)', fontSize: '11px', color: 'var(--text-muted)' }}>
+              Clique fora para fechar
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isLoadingContext && (
+        <div style={{ position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', background: 'var(--accent-emerald)', color: 'black', padding: '8px 16px', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold', zIndex: 2000, boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
+          Buscando contexto...
         </div>
       )}
     </>
